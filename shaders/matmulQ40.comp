@@ -1,0 +1,100 @@
+#version 450
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_nonuniform_qualifier : require
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_control_flow_attributes : enable
+#extension GL_EXT_shader_8bit_storage : require
+#extension GL_EXT_shader_16bit_storage : require
+#extension GL_EXT_shader_explicit_arithmetic_types : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int16 : require
+
+struct BLOCK_Q40
+{
+    float16_t d;
+    uint8_t qs[16];
+};
+
+#define WEIGHT_DATA BLOCK_Q40
+
+#define FLOAT_TYPE float16_t
+
+#define QUANT_K 32
+
+#define QUANT_R 2
+
+layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
+
+// Buffer for weights data
+layout(set = 0, binding = 0) readonly buffer WeightsBuffer {
+    WEIGHT_DATA weightsBuffer[];
+};
+
+// Buffer for input data
+layout(set = 0, binding = 1) readonly buffer InputBuffer {
+    float inputBuffer[];
+};
+
+// Buffer for output data
+layout(set = 0, binding = 2) writeonly buffer OutputBuffer {
+    float outputBuffer[];
+};
+
+// Uniform buffer for matrix information
+layout(set = 1, binding = 0) uniform MatMulInfo {
+    int n;
+    int ds;
+    int de;
+};
+
+const int QK40 = 32;
+const int blocksPerRow = 8;
+const int k = QK40 * blocksPerRow;
+
+shared FLOAT_TYPE tmp[QK40];
+
+vec2 dequantize(uint ib, uint iqs, uint a_offset) {
+    // Read the delta (scaling factor) from the weights buffer at the given offset
+    const float d = float(weightsBuffer[a_offset + ib].d);
+
+    // Read the quantized value from the weights buffer
+    const uint vui = uint(weightsBuffer[a_offset + ib].qs[iqs]);
+
+    // Extract two 4-bit values from the quantized value, convert them to a range of [-8, 7]
+    // and scale them by the delta factor. Return them as a vec2.
+    return (vec2(vui & 0xF, vui >> 4) - 8.0f) * d;
+}  
+
+void main() {
+    uint gid = gl_GlobalInvocationID.x;
+    const uint tid = gl_LocalInvocationID.x % QK40;
+    const uint ncols = de - ds;
+
+    const uint row = gl_WorkGroupID.x;
+    const uint y_offset = QUANT_R == 1 ? 1 : QUANT_K/2;
+    const uint d_offset = gl_GlobalInvocationID.y; // Not sure
+
+    tmp[tid] = FLOAT_TYPE(0.0f);
+
+    [[unroll]] for (uint i = 0; i < ncols/QK40; i += 2) {
+        const uint col = i*QK40 + 2*tid;
+        const uint ib = (row*ncols + col)/QUANT_K;
+        const uint iqs = (col%QUANT_K)/QUANT_R;
+        const uint iybs = col - col%QUANT_K;
+        vec2 v = dequantize(ib, iqs, 0);
+
+        // matrix multiplication
+        tmp[tid] += FLOAT_TYPE(v.x) * FLOAT_TYPE(inputBuffer[iybs+iqs]) +
+                    FLOAT_TYPE(v.y) * FLOAT_TYPE(inputBuffer[iybs+iqs+y_offset]);
+    }
+
+    // sum up partial sums and write back result
+    barrier();
+
+    [[unroll]] for (uint s = QK40/2; s > 0; s >>= 1) {
+        if (tid < s) {
+            tmp[tid] += tmp[tid + s];
+        }
+        barrier();
+    }
+}

@@ -12,6 +12,12 @@
 #include "quants.hpp"
 #include "funcs.hpp"
 
+// Create an array to map enum values to struct instances
+std::unordered_map<VulkanPipelineType, std::string> shaderPathMap = {
+    {F32_F32, "./shaders/matmulF32.spv"},
+    {Q40_F32, "./shaders/matmulQ40.spv"}
+};
+
 // Validation layers to enable
 const std::vector<const char*> validationLayers = {
     "VK_LAYER_KHRONOS_validation"
@@ -19,7 +25,7 @@ const std::vector<const char*> validationLayers = {
 
 // Enabled extensions
 const char* enabledExtensions[] = {
-    //VK_NV_GLSL_SHADER_EXTENSION_NAME
+    VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME
 };
 
 std::vector<char> readFile(const std::string& filename) {
@@ -38,6 +44,16 @@ std::vector<char> readFile(const std::string& filename) {
     file.close();
 
     return buffer;
+}
+
+// Function to get the shader path from FloatType
+std::string getShaderPath(VulkanPipelineType pipelineType) {
+    auto it = shaderPathMap.find(pipelineType);
+    if (it != shaderPathMap.end()) {
+        return it->second;
+    } else {
+        return "Shader path not found!";
+    }
 }
 
 VkShaderModule createShaderModule(VkDevice device, const std::vector<char>& code) {
@@ -69,10 +85,10 @@ uint32_t findMemoryType(VkPhysicalDevice &physicalDevice, uint32_t typeFilter, V
     throw std::runtime_error("Failed to find suitable memory type!");
 }
 
-void matmulVulkanF32(MatmulVulkanInfo* a){
+void matmulVulkanF32(MatmulVulkanInfo* a, VulkanPipelineType pipelineType){
     VulkanContext* vulkan = a->vulkan;
 
-
+    VulkanPipeline* pipeline = vulkan->getPipeline(pipelineType);
 
     printf("Create the buffers\n");
     // Create the buffers
@@ -203,19 +219,19 @@ void matmulVulkanF32(MatmulVulkanInfo* a){
 
     writeDescriptorSet1[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writeDescriptorSet1[0].dstBinding = 0;
-    writeDescriptorSet1[0].dstSet = vulkan->descriptorSets[0];
+    writeDescriptorSet1[0].dstSet = pipeline->descriptorSets[0];
     writeDescriptorSet1[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     writeDescriptorSet1[0].descriptorCount = 1;
     writeDescriptorSet1[0].pBufferInfo = &weightsDescriptorBufferInfo;
     writeDescriptorSet1[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writeDescriptorSet1[1].dstBinding = 1;
-    writeDescriptorSet1[1].dstSet = vulkan->descriptorSets[0];
+    writeDescriptorSet1[1].dstSet = pipeline->descriptorSets[0];
     writeDescriptorSet1[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     writeDescriptorSet1[1].descriptorCount = 1;
     writeDescriptorSet1[1].pBufferInfo = &inputDescriptorBufferInfo;
     writeDescriptorSet1[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writeDescriptorSet1[2].dstBinding = 2;
-    writeDescriptorSet1[2].dstSet = vulkan->descriptorSets[0];
+    writeDescriptorSet1[2].dstSet = pipeline->descriptorSets[0];
     writeDescriptorSet1[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     writeDescriptorSet1[2].descriptorCount = 1;
     writeDescriptorSet1[2].pBufferInfo = &outputDescriptorBufferInfo;
@@ -223,7 +239,7 @@ void matmulVulkanF32(MatmulVulkanInfo* a){
     
     writeDescriptorSet2[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writeDescriptorSet2[0].dstBinding = 0; 
-    writeDescriptorSet2[0].dstSet = vulkan->descriptorSets[1];
+    writeDescriptorSet2[0].dstSet = pipeline->descriptorSets[1];
     writeDescriptorSet2[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER; 
     writeDescriptorSet2[0].descriptorCount = 1;
     writeDescriptorSet2[0].pBufferInfo = &matmulDescriptorBufferInfo;
@@ -235,14 +251,14 @@ void matmulVulkanF32(MatmulVulkanInfo* a){
         
     printf("Create a pointer to the commandBuffer member\n");
     // Create a pointer to the commandBuffer member
-    VkCommandBuffer commandBuffer = vulkan->commandBuffer;
+    VkCommandBuffer commandBuffer = pipeline->commandBuffer;
 
     vkBeginCommandBuffer(commandBuffer, &cmdBufferBeginInfo);
 
     printf("Bind pipeline and descriptor sets to the command buffer\n");
     // Bind pipeline and descriptor sets to the command buffer
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkan->pipeline);
-    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkan->pipelineLayout, 0, 2, vulkan->descriptorSets, 0, nullptr);
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline->pipeline);
+    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline->pipelineLayout, 0, 2, pipeline->descriptorSets, 0, nullptr);
 
     uint numGroups = (a->de - a->ds + 15) / 16;  // Make sure to cover all elements
     vkCmdDispatch(commandBuffer, numGroups, 1, 1);
@@ -254,7 +270,7 @@ void matmulVulkanF32(MatmulVulkanInfo* a){
     VkSubmitInfo submitInfo = {};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &vulkan->commandBuffer;
+    submitInfo.pCommandBuffers = &pipeline->commandBuffer;
 
     vkQueueSubmit(vulkan->computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
     vkQueueWaitIdle(vulkan->computeQueue);
@@ -306,7 +322,7 @@ void matmulVulkan(VulkanContext* vulkan, FloatType weightsFloatType, FloatType i
             v.ds = ds;
             v.de = de;
             //matmulF32(&s);
-            matmulVulkanF32(&v);
+            matmulVulkanF32(&v, VulkanPipelineType::F32_F32);
             return;
         }
         if (weightsFloatType == F16) {
@@ -436,12 +452,17 @@ void VulkanContext::getDevice() {
     vkGetDeviceQueue(device, computeQueueFamilyIndex, 0, &computeQueue);
 }
 
-void VulkanContext::loadComputeShaderModule(const std::string &shaderPath) {
+VkShaderModule VulkanContext::loadComputeShaderModule(const std::string &shaderPath) {
     std::vector<char> shaderCode = readFile(shaderPath);
-    shaderModule = createShaderModule(device, shaderCode);
+    return createShaderModule(device, shaderCode);
 }
 
-void VulkanContext::createDescriptorSetLayout() {
+void VulkanContext::createPipeline(VulkanPipelineType pipelineType) {
+    VulkanPipeline vulkanPipeline = {};
+    vulkanPipeline.weightsFloatType = FloatType::F32;
+    vulkanPipeline.inputFloatType = FloatType::F32;
+    vulkanPipeline.shaderModule = loadComputeShaderModule(getShaderPath(pipelineType));
+    
     // Define the descriptor set layout bindings
     VkDescriptorSetLayoutBinding weightsBufferBinding = {};
     weightsBufferBinding.binding = 0; // Binding point for the input buffer
@@ -487,23 +508,21 @@ void VulkanContext::createDescriptorSetLayout() {
     descriptorLayoutCreateInfoSet1.bindingCount = 1;
     descriptorLayoutCreateInfoSet1.pBindings = bindingsSet1;
 
-    VkResult result = vkCreateDescriptorSetLayout(device, &descriptorLayoutCreateInfoSet0, nullptr, &descriptorSetLayoutSet0);
+    VkResult result = vkCreateDescriptorSetLayout(device, &descriptorLayoutCreateInfoSet0, nullptr, &vulkanPipeline.descriptorSetLayoutSet0);
     if (result != VK_SUCCESS) {
         std::cerr << "Failed to create descriptorSetLayoutSet0." << std::endl;
     }
-    result = vkCreateDescriptorSetLayout(device, &descriptorLayoutCreateInfoSet1, nullptr, &descriptorSetLayoutSet1);
+    result = vkCreateDescriptorSetLayout(device, &descriptorLayoutCreateInfoSet1, nullptr, &vulkanPipeline.descriptorSetLayoutSet1);
     if (result != VK_SUCCESS) {
         std::cerr << "Failed to create descriptorSetLayoutSet1." << std::endl;
     }
-}
 
-void VulkanContext::createPipeline() {
-    VkDescriptorSetLayout layouts[] = { descriptorSetLayoutSet0, descriptorSetLayoutSet1 };
+    VkDescriptorSetLayout layouts[] = { vulkanPipeline.descriptorSetLayoutSet0, vulkanPipeline.descriptorSetLayoutSet1 };
 
     VkPipelineShaderStageCreateInfo shaderStageInfo{};
     shaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    shaderStageInfo.module = shaderModule;
+    shaderStageInfo.module = vulkanPipeline.shaderModule;
     shaderStageInfo.pName = "main";
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
@@ -511,16 +530,16 @@ void VulkanContext::createPipeline() {
     pipelineLayoutInfo.setLayoutCount = 2;
     pipelineLayoutInfo.pSetLayouts = layouts;
 
-    if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
+    if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &vulkanPipeline.pipelineLayout) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create pipeline layout!");
     }
 
     VkComputePipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
     pipelineInfo.stage = shaderStageInfo;
-    pipelineInfo.layout = pipelineLayout;
+    pipelineInfo.layout = vulkanPipeline.pipelineLayout;
 
-    if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline) != VK_SUCCESS) {
+    if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &vulkanPipeline.pipeline) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create compute pipeline!");
     }
 
@@ -541,17 +560,16 @@ void VulkanContext::createPipeline() {
     descriptorPoolCreateInfo.poolSizeCount = 2;
     descriptorPoolCreateInfo.pPoolSizes = poolSizes;
 
-    vkCreateDescriptorPool(device, &descriptorPoolCreateInfo, nullptr, &descriptorPool);
+    vkCreateDescriptorPool(device, &descriptorPoolCreateInfo, nullptr, &vulkanPipeline.descriptorPool);
 
     VkDescriptorSetAllocateInfo descriptorSetAllocateInfo = {};
     descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    descriptorSetAllocateInfo.descriptorPool = descriptorPool;
+    descriptorSetAllocateInfo.descriptorPool = vulkanPipeline.descriptorPool;
     descriptorSetAllocateInfo.descriptorSetCount = 2;
     descriptorSetAllocateInfo.pSetLayouts = layouts;
 
     // Allocate the descriptor sets
-    descriptorSets[2] = {};
-    vkAllocateDescriptorSets(device, &descriptorSetAllocateInfo, descriptorSets);
+    vkAllocateDescriptorSets(device, &descriptorSetAllocateInfo, vulkanPipeline.descriptorSets);
 
     // Create the command pool
     VkCommandPoolCreateInfo commandPoolCreateInfo = {};
@@ -559,16 +577,29 @@ void VulkanContext::createPipeline() {
     commandPoolCreateInfo.queueFamilyIndex = computeQueueFamilyIndex;
     commandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 
-    vkCreateCommandPool(device, &commandPoolCreateInfo, nullptr, &commandPool);
+    vkCreateCommandPool(device, &commandPoolCreateInfo, nullptr, &vulkanPipeline.commandPool);
 
     // Allocate and begin recording the command buffer
     VkCommandBufferAllocateInfo cmdBufferAllocateInfo = {};
     cmdBufferAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     cmdBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    cmdBufferAllocateInfo.commandPool = commandPool;
+    cmdBufferAllocateInfo.commandPool = vulkanPipeline.commandPool;
     cmdBufferAllocateInfo.commandBufferCount = 1;
 
-    vkAllocateCommandBuffers(device, &cmdBufferAllocateInfo, &commandBuffer);
+    vkAllocateCommandBuffers(device, &cmdBufferAllocateInfo, &vulkanPipeline.commandBuffer);
+
+    pipelines[pipelineType] = vulkanPipeline;
+}
+
+VulkanPipeline* VulkanContext::getPipeline(VulkanPipelineType pipelineType){
+    // Check if the pipeline exists in the map
+    auto it = pipelines.find(pipelineType);
+    if (it != pipelines.end()) {
+        return &(it->second);
+    } else {
+        throw std::runtime_error("No pipeline exists for the specified floatType.");
+        return nullptr;
+    }
 }
 
 void VulkanContext::initialize() {
@@ -579,13 +610,16 @@ void VulkanContext::initialize() {
     getDevice();
 
     // Load the matmul F32 compute shader module
-    loadComputeShaderModule("./shaders/matmulF32.spv");
+    //loadComputeShaderModule("./shaders/matmulF32.spv");
 
     // Create the descriptor set layout
-    createDescriptorSetLayout();
+    //createDescriptorSetLayout();
 
     // Create the pipeline for the matmul F32 compute shader
-    createPipeline();
+    createPipeline(VulkanPipelineType::F32_F32);
+
+    // Create the pipeline for the matmul Q40 compute shader
+    createPipeline(VulkanPipelineType::Q40_F32);
 }
 
 VulkanContext::VulkanContext() {

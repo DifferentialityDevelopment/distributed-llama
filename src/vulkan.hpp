@@ -4,7 +4,9 @@
 #include <vulkan/vulkan.h>
 #include "quants.hpp"
 #include <vector>
+#include <unordered_map>
 #include <string>
+#include <array>
 
 #define SPLIT_RANGE_TO_THREADS(varStart, varEnd, rangeStart, rangeEnd, nThreads, threadIndex) \
     const unsigned int rangeLen = (rangeEnd - rangeStart); \
@@ -19,15 +21,33 @@ struct MatMulInfo {
     int de;
 };
 
+enum VulkanPipelineType {
+    F32_F32 = 0,
+    F16_F32 = 1,
+    Q40_F32 = 2,
+    Q80_F32 = 3,
+    Q40_Q80 = 4,
+    Q80_Q80 = 5,
+};
+
+struct VulkanPipeline {
+    FloatType weightsFloatType;
+    FloatType inputFloatType;
+    VkShaderModule shaderModule; //done
+    VkCommandPool commandPool; //done
+    VkDescriptorPool descriptorPool; //done
+    VkDescriptorSetLayout descriptorSetLayoutSet0; //done
+    VkDescriptorSetLayout descriptorSetLayoutSet1;//done
+    VkPipelineLayout pipelineLayout; //done
+    VkPipeline pipeline; //done
+    VkCommandBuffer commandBuffer; //done
+    VkDescriptorSet descriptorSets[2];
+};
+
 class VulkanContext {
 private:
     VkInstance instance;
     VkApplicationInfo appInfo;
-    VkShaderModule shaderModule;
-    VkCommandPool commandPool;
-    VkDescriptorPool descriptorPool;
-    VkDescriptorSetLayout descriptorSetLayoutSet0;
-    VkDescriptorSetLayout descriptorSetLayoutSet1;
     /*
     VkDescriptorSet descriptorSet;
     VkBuffer inputBuffer, weightsBuffer, outputBuffer;
@@ -39,21 +59,19 @@ private:
     void initialize();
     void createInstance();
     void getDevice();
-    void loadComputeShaderModule(const std::string &shaderPath);
+    VkShaderModule loadComputeShaderModule(const std::string &shaderPath);
     void createDescriptorSetLayout();
-    void createPipeline();
+    void createPipeline(VulkanPipelineType pipelineType);
 public:
-    VkDevice device;
-    VkPhysicalDevice physicalDevice;
-    std::vector<VkPhysicalDevice> physicalDevices;
-    int computeQueueFamilyIndex;
-    VkQueue computeQueue;
-    VkPipelineLayout pipelineLayout;
-    VkPipeline pipeline;
-    VkCommandBuffer commandBuffer;
-    VkDescriptorSet descriptorSets[2];
+    VkDevice device; //done
+    VkPhysicalDevice physicalDevice; //done
+    std::vector<VkPhysicalDevice> physicalDevices; //done
+    int computeQueueFamilyIndex; //done
+    VkQueue computeQueue; //done
+    std::unordered_map<VulkanPipelineType, VulkanPipeline> pipelines; //done
     VulkanContext();
     ~VulkanContext();
+    VulkanPipeline* getPipeline(VulkanPipelineType pipelineType);
 };
 
 /*
