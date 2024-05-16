@@ -9,9 +9,9 @@ void testMatmulQ80(VulkanContext* vulkan) {
     const int n = 512;
     const int d = 256;
     unsigned long long state = 88888888L;
-    float x[n];
-    float w[n * d];
-    float y[d];
+    float x[n]; // input matrix
+    float w[n * d];  // weights matrix
+    float y[d]; //output matrix
     float yQ0[d];
     float yQ1[d];
     int i;

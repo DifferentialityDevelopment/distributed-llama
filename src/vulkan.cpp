@@ -54,7 +54,8 @@ VkShaderModule createShaderModule(VkDevice device, const std::vector<char>& code
     return shaderModule;
 }
 
-uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties) {
+uint32_t findMemoryType(VkPhysicalDevice &physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties) {
+    // Retrieve physical device memory properties
     VkPhysicalDeviceMemoryProperties memProperties;
     vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
 
@@ -64,12 +65,16 @@ uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, Vk
         }
     }
 
+    printf("ERROR: Failed to find suitable memory type!\n");
     throw std::runtime_error("Failed to find suitable memory type!");
 }
 
 void matmulVulkanF32(MatmulVulkanInfo* a){
-    VulkanContext* vulkan = static_cast<VulkanContext*>(a->vulkan);
+    VulkanContext* vulkan = a->vulkan;
 
+
+
+    printf("Create the buffers\n");
     // Create the buffers
     VkBufferCreateInfo weightsBufferInfo = {};
     weightsBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -101,6 +106,7 @@ void matmulVulkanF32(MatmulVulkanInfo* a){
     vkCreateBuffer(vulkan->device, &outputBufferInfo, nullptr, &outputBuffer);
     vkCreateBuffer(vulkan->device, &matMulBufferInfo, nullptr, &matMulBuffer);
 
+    printf("Get memory requirements for the buffers\n");
     // Get memory requirements for the buffers
     VkMemoryRequirements memRequirementsWeights;
     vkGetBufferMemoryRequirements(vulkan->device, weightsBuffer, &memRequirementsWeights);
@@ -112,23 +118,28 @@ void matmulVulkanF32(MatmulVulkanInfo* a){
     vkGetBufferMemoryRequirements(vulkan->device, matMulBuffer, &memoryRequirementsMatMulInfo);
 
     // Get memory allocation requirements
+    printf("Get memory allocation requirements 1\n");
     VkMemoryAllocateInfo allocInfoWeights = {};
     allocInfoWeights.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     allocInfoWeights.allocationSize = memRequirementsWeights.size;
-    allocInfoWeights.memoryTypeIndex = findMemoryType(vulkan->physicalDevice, memRequirementsWeights.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    allocInfoWeights.memoryTypeIndex = findMemoryType(vulkan->physicalDevices[0], memRequirementsWeights.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    printf("Get memory allocation requirements 2\n");
     VkMemoryAllocateInfo allocInfoInput = {};
     allocInfoInput.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     allocInfoInput.allocationSize = memRequirementsInput.size;
-    allocInfoInput.memoryTypeIndex = findMemoryType(vulkan->physicalDevice, memRequirementsInput.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    allocInfoInput.memoryTypeIndex = findMemoryType(vulkan->physicalDevices[0], memRequirementsInput.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    printf("Get memory allocation requirements 3\n");
     VkMemoryAllocateInfo allocInfoOutput = {};
     allocInfoOutput.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     allocInfoOutput.allocationSize = memoryRequirementsOutput.size;
-    allocInfoOutput.memoryTypeIndex = findMemoryType(vulkan->physicalDevice, memoryRequirementsOutput.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    allocInfoOutput.memoryTypeIndex = findMemoryType(vulkan->physicalDevices[0], memoryRequirementsOutput.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    printf("Get memory allocation requirements 4\n");
     VkMemoryAllocateInfo allocInfoMatMul = {};
     allocInfoMatMul.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     allocInfoMatMul.allocationSize = memoryRequirementsMatMulInfo.size;
-    allocInfoMatMul.memoryTypeIndex = findMemoryType(vulkan->physicalDevice, memoryRequirementsMatMulInfo.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    allocInfoMatMul.memoryTypeIndex = findMemoryType(vulkan->physicalDevices[0], memoryRequirementsMatMulInfo.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
+    printf("Allocate and map memory for the buffers\n");
     //Allocate and map memory for the buffers
     VkDeviceMemory weightsBufferMemory, inputBufferMemory, outputBufferMemory, matMulBufferMemory;
     vkAllocateMemory(vulkan->device, &allocInfoWeights, nullptr, &weightsBufferMemory);
@@ -136,12 +147,14 @@ void matmulVulkanF32(MatmulVulkanInfo* a){
     vkAllocateMemory(vulkan->device, &allocInfoOutput, nullptr, &outputBufferMemory);
     vkAllocateMemory(vulkan->device, &allocInfoMatMul, nullptr, &matMulBufferMemory);
 
+    printf("Bind the memory to the buffers\n");
     // Bind the memory to the buffers
     vkBindBufferMemory(vulkan->device, weightsBuffer, weightsBufferMemory, 0);
     vkBindBufferMemory(vulkan->device, inputBuffer, inputBufferMemory, 0);
     vkBindBufferMemory(vulkan->device, outputBuffer, outputBufferMemory, 0);
     vkBindBufferMemory(vulkan->device, matMulBuffer, matMulBufferMemory, 0);
 
+    printf("Copy the weights to GPU memory\n");
     // Copy the weights to GPU memory
     float* weightsData;
     VkResult result = vkMapMemory(vulkan->device, weightsBufferMemory, 0, weightsBufferInfo.size, 0, (void**)&weightsData);
@@ -151,6 +164,7 @@ void matmulVulkanF32(MatmulVulkanInfo* a){
     memcpy(weightsData, a->weights, weightsBufferInfo.size);
     vkUnmapMemory(vulkan->device, weightsBufferMemory);
     
+    printf("Copy the input to GPU memory\n");
     // Copy the input to GPU memory
     float* inputData;
     result = vkMapMemory(vulkan->device, inputBufferMemory, 0, inputBufferInfo.size, 0, (void**)&inputData);
@@ -165,6 +179,7 @@ void matmulVulkanF32(MatmulVulkanInfo* a){
     matmulInfo.de = a->de;
     matmulInfo.ds = a->ds;
 
+    printf("Copy the matmul info to GPU memory\n");
     // Copy the matmul info to GPU memory
     void* matMulData;
     result = vkMapMemory(vulkan->device, matMulBufferMemory, 0, matMulBufferInfo.size, 0, (void**)&matMulData);
@@ -174,12 +189,14 @@ void matmulVulkanF32(MatmulVulkanInfo* a){
     memcpy(matMulData, &matmulInfo, matMulBufferInfo.size);
     vkUnmapMemory(vulkan->device, matMulBufferMemory);
 
+    printf("Bind the buffers to the descriptor sets\n");
     // Bind the buffers to the descriptor sets
     VkDescriptorBufferInfo weightsDescriptorBufferInfo = { weightsBuffer, 0, VK_WHOLE_SIZE };
     VkDescriptorBufferInfo inputDescriptorBufferInfo = { inputBuffer, 0, VK_WHOLE_SIZE };
     VkDescriptorBufferInfo outputDescriptorBufferInfo = { outputBuffer, 0, VK_WHOLE_SIZE };
     VkDescriptorBufferInfo matmulDescriptorBufferInfo = { matMulBuffer, 0, VK_WHOLE_SIZE };
 
+    printf("Write and update the descriptor sets\n");
     // Write and update the descriptor sets
     VkWriteDescriptorSet writeDescriptorSet1[3] = {};
     VkWriteDescriptorSet writeDescriptorSet2[1] = {};
@@ -216,19 +233,23 @@ void matmulVulkanF32(MatmulVulkanInfo* a){
     cmdBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     cmdBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         
+    printf("Create a pointer to the commandBuffer member\n");
     // Create a pointer to the commandBuffer member
     VkCommandBuffer commandBuffer = vulkan->commandBuffer;
 
     vkBeginCommandBuffer(commandBuffer, &cmdBufferBeginInfo);
 
+    printf("Bind pipeline and descriptor sets to the command buffer\n");
     // Bind pipeline and descriptor sets to the command buffer
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkan->pipeline);
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkan->pipelineLayout, 0, 2, vulkan->descriptorSets, 0, nullptr);
 
-    vkCmdDispatch(commandBuffer, 1, 1, 1);
+    uint numGroups = (a->de - a->ds + 15) / 16;  // Make sure to cover all elements
+    vkCmdDispatch(commandBuffer, numGroups, 1, 1);
 
     vkEndCommandBuffer(commandBuffer);
     
+    printf("Wait for the compute shader to finish\n");
     // Wait for the compute shader to finish
     VkSubmitInfo submitInfo = {};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -238,13 +259,17 @@ void matmulVulkanF32(MatmulVulkanInfo* a){
     vkQueueSubmit(vulkan->computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
     vkQueueWaitIdle(vulkan->computeQueue);
 
+    printf("Get the output from the compute shader\n");
     //Get the output from the compute shader
     float* outputData;
+    printf("Output Data: %d\n", (int)sizeof(outputData));
     result = vkMapMemory(vulkan->device, outputBufferMemory, 0, outputBufferInfo.size, 0, (void**)&outputData);
     if (result != VK_SUCCESS) {
         std::cerr << "Failed to map matrix info memory" << std::endl;
     }
-    memcpy(a->output, &outputData, outputBufferInfo.size);
+    printf("Output Data: %d\n", (int)sizeof(outputData));
+    memcpy(a->output, outputData, outputBufferInfo.size);
+    printf("Output Data: %d\n", (int)sizeof(outputData));
     vkUnmapMemory(vulkan->device, outputBufferMemory);
     printf("Processed output using vulkan!\n");
 }
@@ -348,19 +373,16 @@ void VulkanContext::getDevice() {
         throw;
     }
 
-    std::vector<VkPhysicalDevice> physicalDevices(deviceCount);
+    physicalDevices = std::vector<VkPhysicalDevice>(deviceCount);
     vkEnumeratePhysicalDevices(instance, &deviceCount, physicalDevices.data());
-
-    // Choose a physical device (for simplicity, just choose the first one)
-    VkPhysicalDevice physicalDevice = physicalDevices[0];
 
     // Query physical device properties
     VkPhysicalDeviceProperties deviceProperties;
-    vkGetPhysicalDeviceProperties(physicalDevice, &deviceProperties);
+    vkGetPhysicalDeviceProperties(physicalDevices[0], &deviceProperties);
 
     // Check device features and queues
     VkPhysicalDeviceFeatures deviceFeatures;
-    vkGetPhysicalDeviceFeatures(physicalDevice, &deviceFeatures);
+    vkGetPhysicalDeviceFeatures(physicalDevices[0], &deviceFeatures);
 
     // Print physical device properties
     std::cout << "Device Name: " << deviceProperties.deviceName << std::endl;
@@ -370,9 +392,9 @@ void VulkanContext::getDevice() {
 
     // Query device queue families
     uint32_t queueFamilyCount = 0;
-    vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, nullptr);
+    vkGetPhysicalDeviceQueueFamilyProperties(physicalDevices[0], &queueFamilyCount, nullptr);
     std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
-    vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, queueFamilies.data());
+    vkGetPhysicalDeviceQueueFamilyProperties(physicalDevices[0], &queueFamilyCount, queueFamilies.data());
 
     // Find a queue family that supports compute operations
     computeQueueFamilyIndex = -1;
@@ -403,7 +425,7 @@ void VulkanContext::getDevice() {
     deviceCreateInfo.pQueueCreateInfos = &queueCreateInfo;
     deviceCreateInfo.pEnabledFeatures = &deviceFeatures;
 
-    VkResult result = vkCreateDevice(physicalDevice, &deviceCreateInfo, nullptr, &device);
+    VkResult result = vkCreateDevice(physicalDevices[0], &deviceCreateInfo, nullptr, &device);
     if (result != VK_SUCCESS) {
         std::cerr << "Failed to create logical device." << std::endl;
         vkDestroyInstance(instance, nullptr);

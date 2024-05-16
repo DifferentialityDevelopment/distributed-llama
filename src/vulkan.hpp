@@ -13,26 +13,6 @@
     const unsigned int varStart = threadIndex * rangeSlice + (threadIndex < rangeRest ? threadIndex : rangeRest); \
     const unsigned int varEnd = varStart + rangeSlice + (threadIndex < rangeRest ? 1 : 0);
 
-/*
- * Explanation of MatmulVulkanInfo members:
-    * - vulkan context: Pointer to vulkan context
- * - float* output: Pointer to the output array where the result of matrix multiplication is stored.
- * - void* input: Pointer to the input data (either float or quantized).
- * - void* weights: Pointer to the weight data (either float or quantized).
- * - int n: Number of columns in the input matrix (dimensionality of input).
- * - int ds: Start index of the output array slice that the thread will compute.
- * - int de: End index (exclusive) of the output array slice that the thread will compute.
- */
-struct MatmulVulkanInfo {
-    void* vulkan;
-    float* output;
-    void* input;
-    void* weights;
-    int n;
-    int ds;
-    int de;
-};
-
 struct MatMulInfo {
     int n;
     int ds;
@@ -65,6 +45,7 @@ private:
 public:
     VkDevice device;
     VkPhysicalDevice physicalDevice;
+    std::vector<VkPhysicalDevice> physicalDevices;
     int computeQueueFamilyIndex;
     VkQueue computeQueue;
     VkPipelineLayout pipelineLayout;
@@ -73,6 +54,26 @@ public:
     VkDescriptorSet descriptorSets[2];
     VulkanContext();
     ~VulkanContext();
+};
+
+/*
+ * Explanation of MatmulVulkanInfo members:
+    * - vulkan context: Pointer to vulkan context
+ * - float* output: Pointer to the output array where the result of matrix multiplication is stored.
+ * - void* input: Pointer to the input data (either float or quantized).
+ * - void* weights: Pointer to the weight data (either float or quantized).
+ * - int n: Number of columns in the input matrix (dimensionality of input).
+ * - int ds: Start index of the output array slice that the thread will compute.
+ * - int de: End index (exclusive) of the output array slice that the thread will compute.
+ */
+struct MatmulVulkanInfo {
+    VulkanContext* vulkan;
+    float* output;
+    void* input;
+    void* weights;
+    int n;
+    int ds;
+    int de;
 };
 
 void matmulVulkan(VulkanContext* vulkan, FloatType weightsFloatType, FloatType inputFloatType, float* output, void* input, void* weights, int n, int d, unsigned int nThreads, unsigned int threadIndex);

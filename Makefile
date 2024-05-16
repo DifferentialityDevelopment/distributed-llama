@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = -std=c++11 -Werror -O3 -march=native -mtune=native
+CXXFLAGS = -std=c++11 -g -Werror -O3 -march=native -mtune=native
 LDFLAGS = -lpthread
 
 # Define a flag for Vulkan support

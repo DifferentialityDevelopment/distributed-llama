@@ -22,19 +22,16 @@ layout(set = 1, binding = 0) uniform MatMulInfo {
     int de;
 };
 
-layout(local_size_x = 1, local_size_y = 1) in;
+layout(local_size_x = 16, local_size_y = 1) in;
 
 void main() {
     uint d = gl_GlobalInvocationID.x + ds;
-    
-    if (d >= de) {
-        return;
+    uint r = de - ds;
+    if (d < de) {
+        float val = 0.0;
+        for (int j = 0; j < n; j++) {
+            val += weightsBuffer[d * n + j] * inputBuffer[j];
+        }
+        outputBuffer[d] = val;
     }
-    
-    float val = 0.0;
-    for (int j = 0; j < n; ++j) {
-        val += weightsBuffer[d * n + j] * inputBuffer[j];
-    }
-    
-    outputBuffer[d] = val;
 }
