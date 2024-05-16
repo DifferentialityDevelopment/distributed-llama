@@ -139,16 +139,6 @@ void rmsnorm(float* o, const float* x, const float ms, const float* weight, cons
 #endif
 }
 
-struct MatmulThreadInfo {
-    pthread_t handler;
-    float* output;
-    void* input;
-    void* weights;
-    int n;
-    int ds;
-    int de;
-};
-
 void matmulF32(MatmulThreadInfo* a) {
     const float* input = (float*)a->input;
     float* w = (float*)a->weights;

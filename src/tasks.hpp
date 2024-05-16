@@ -10,11 +10,18 @@
 #define TASK_TYPE_INFERENCE 0
 #define TASK_TYPE_TRANSFER 1
 
+#ifdef VULKAN
+    #include "vulkan.hpp"
+#endif
+
 struct TransformerContext {
     Transformer* transformer;
     Socket* socket;
     SocketPool* socketPool;
     unsigned int currentBlockIndex;
+    #ifdef VULKAN
+    VulkanContext* vulkan;
+    #endif
 };
 
 typedef void (InferenceInitializer)(TransformerContext* context);
@@ -36,11 +43,23 @@ public:
     void W(TaskLoopHandler* handler, unsigned int taskType);
 };
 
+#ifdef VULKAN
 #define TASK_VARIABLES \
     TransformerContext* ctx = (TransformerContext*)userData; \
     Transformer* transformer = ctx->transformer; \
     TransformerBlock* block = transformer->blocks[ctx->currentBlockIndex]; \
-    TransformerSpec* spec = transformer->spec; // printf("%s:%d\n", __FUNCTION__, ctx->currentBlockIndex); fflush(stdout);
+    TransformerSpec* spec = transformer->spec; \
+    VulkanContext* vulkan = ctx->vulkan;
+#else
+#define TASK_VARIABLES \
+    TransformerContext* ctx = (TransformerContext*)userData; \
+    Transformer* transformer = ctx->transformer; \
+    TransformerBlock* block = transformer->blocks[ctx->currentBlockIndex]; \
+    TransformerSpec* spec = transformer->spec;
+#endif
+
+
+
 
 void syncUnitBuffer(unsigned int nThreads, unsigned int threadIndex, TransformerContext* ctx, uint8_t bufferIndex);
 void syncSliceOfSlicedBuffer(unsigned int nThreads, unsigned int threadIndex, TransformerContext* ctx, uint8_t bufferIndex);

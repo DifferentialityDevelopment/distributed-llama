@@ -2,6 +2,10 @@
 #include <cassert>
 #include <cstring>
 
+#ifdef VULKAN
+    #include "vulkan.hpp"
+#endif
+
 TransformerArch::TransformerArch() {
     inference.nTasks = 0;
     worker.nTasks = 0;
@@ -186,6 +190,9 @@ Inference::Inference(TransformerArch* arch, unsigned int nThreads, Transformer* 
     context.transformer = transformer;
     context.socket = NULL;
     context.socketPool = socketPool;
+    #ifdef VULKAN
+        context.vulkan = new VulkanContext();
+    #endif
     assert(arch->inference.tasks[0].handler == sendPos);
     taskLoop = new TaskLoop(nThreads, arch->inference.nTasks, TASK_N_TYPES, arch->inference.tasks, (void*)&context);
 }
@@ -218,6 +225,9 @@ Worker::Worker(TransformerArch* arch, unsigned int nThreads, Transformer* transf
     context.transformer = transformer;
     context.socket = socket;
     context.socketPool = NULL;
+    #ifdef VULKAN
+        context.vulkan = new VulkanContext();
+    #endif
     taskLoop = new TaskLoop(nThreads, arch->worker.nTasks, TASK_N_TYPES, arch->worker.tasks, (void*)&context);
 }
 

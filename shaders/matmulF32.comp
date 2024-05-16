@@ -1,0 +1,40 @@
+#version 450
+
+// Buffer for weights data
+layout(set = 0, binding = 0) buffer WeightsBuffer {
+    float weightsBuffer[];
+};
+
+// Buffer for input data
+layout(set = 0, binding = 1) buffer InputBuffer {
+    float inputBuffer[];
+};
+
+// Buffer for output data
+layout(set = 0, binding = 2) buffer OutputBuffer {
+    float outputBuffer[];
+};
+
+// Uniform buffer for info about the matrices?
+layout(set = 1, binding = 0) uniform MatMulInfo {
+    int n;
+    int ds;
+    int de;
+};
+
+layout(local_size_x = 1, local_size_y = 1) in;
+
+void main() {
+    uint d = gl_GlobalInvocationID.x + ds;
+    
+    if (d >= de) {
+        return;
+    }
+    
+    float val = 0.0;
+    for (int j = 0; j < n; ++j) {
+        val += weightsBuffer[d * n + j] * inputBuffer[j];
+    }
+    
+    outputBuffer[d] = val;
+}

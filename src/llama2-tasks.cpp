@@ -1,11 +1,16 @@
 #include <cmath>
 #include <cassert>
 #include <string.h>
+#include <cstdio>
 #include "utils.hpp"
 #include "funcs.hpp"
 #include "socket.hpp"
 #include "tasks.hpp"
 #include "llama2-tasks.hpp"
+
+#ifdef VULKAN
+#include "vulkan.hpp"
+#endif
 
 void llamaRmsAtt(TASK_ARGS) {
     TASK_VARIABLES;
@@ -32,6 +37,7 @@ void llamaSyncRmsAtt(TASK_ARGS) {
 
 void llamaQkv(TASK_ARGS) {
     TASK_VARIABLES;
+
     assert(block->kvCacheSlice->kvDim0 == block->k0Slice->d0);
     assert(block->kvCacheSlice->kvDim0 == block->v0Slice->d0);
 
@@ -39,9 +45,15 @@ void llamaQkv(TASK_ARGS) {
     float *k0 = &block->kvCacheSlice->keyCache[transformer->pos * block->kvCacheSlice->kvDim0];
     float* v0 = &block->kvCacheSlice->valueCache[transformer->pos * block->kvCacheSlice->kvDim0];
 
-    matmul(spec->weightsFloatType, spec->bufferFloatType, block->qo0, xbq, block->q0, block->q0Slice->n, block->q0Slice->d0, nThreads, threadIndex);
-    matmul(spec->weightsFloatType, spec->bufferFloatType, k0, xbq, block->k0, block->k0Slice->n, block->k0Slice->d0, nThreads, threadIndex);
-    matmul(spec->weightsFloatType, spec->bufferFloatType, v0, xbq, block->v0, block->v0Slice->n, block->v0Slice->d0, nThreads, threadIndex);
+    #ifdef VULKAN
+        matmulVulkan(ctx->vulkan, spec->weightsFloatType, spec->bufferFloatType, block->qo0, xbq, block->q0, block->q0Slice->n, block->q0Slice->d0, nThreads, threadIndex);
+        matmulVulkan(ctx->vulkan, spec->weightsFloatType, spec->bufferFloatType, k0, xbq, block->k0, block->k0Slice->n, block->k0Slice->d0, nThreads, threadIndex);
+        matmulVulkan(ctx->vulkan, spec->weightsFloatType, spec->bufferFloatType, v0, xbq, block->v0, block->v0Slice->n, block->v0Slice->d0, nThreads, threadIndex);
+    #else
+        matmul(spec->weightsFloatType, spec->bufferFloatType, block->qo0, xbq, block->q0, block->q0Slice->n, block->q0Slice->d0, nThreads, threadIndex);
+        matmul(spec->weightsFloatType, spec->bufferFloatType, k0, xbq, block->k0, block->k0Slice->n, block->k0Slice->d0, nThreads, threadIndex);
+        matmul(spec->weightsFloatType, spec->bufferFloatType, v0, xbq, block->v0, block->v0Slice->n, block->v0Slice->d0, nThreads, threadIndex);
+    #endif
 }
 
 void llamaRope(TASK_ARGS) {
