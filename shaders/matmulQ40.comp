@@ -1,23 +1,21 @@
 #version 450
+#extension GL_EXT_scalar_block_layout : require
 #extension GL_EXT_buffer_reference2 : require
 #extension GL_EXT_nonuniform_qualifier : require
-#extension GL_EXT_scalar_block_layout : require
 #extension GL_EXT_control_flow_attributes : enable
-#extension GL_EXT_shader_8bit_storage : require
-#extension GL_EXT_shader_16bit_storage : require
-#extension GL_EXT_shader_explicit_arithmetic_types : require
-#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
-#extension GL_EXT_shader_explicit_arithmetic_types_int16 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
 
 struct BLOCK_Q40
 {
     float16_t d;
-    uint8_t qs[16];
+    float16_t qs[8];
 };
 
 #define WEIGHT_DATA BLOCK_Q40
 
 #define FLOAT_TYPE float16_t
+
+#define D_TYPE float16_t
 
 #define QUANT_K 32
 
@@ -57,13 +55,18 @@ vec2 dequantize(uint ib, uint iqs, uint a_offset) {
     // Read the delta (scaling factor) from the weights buffer at the given offset
     const float d = float(weightsBuffer[a_offset + ib].d);
 
-    // Read the quantized value from the weights buffer
-    const uint vui = uint(weightsBuffer[a_offset + ib].qs[iqs]);
+    // Read the quantized float16_t value from the weights buffer
+    const uint quantizedValue = floatBitsToUint(weightsBuffer[a_offset + ib].qs[iqs / 4]);
 
-    // Extract two 4-bit values from the quantized value, convert them to a range of [-8, 7]
-    // and scale them by the delta factor. Return them as a vec2.
-    return (vec2(vui & 0xF, vui >> 4) - 8.0f) * d;
-}  
+    // Extract the specific 4-bit quantized value
+    const uint shiftAmount = (iqs % 4) * 4;
+    const uint quantizedSubValue = (quantizedValue >> shiftAmount) & 0xF;
+
+    // Convert the 4-bit value to a range of [-8, 7] and scale by the delta factor
+    float dequantizedValue = (float(quantizedSubValue) - 8.0f) * d;
+
+    return vec2(dequantizedValue, dequantizedValue); // Assuming both outputs are the same for simplicity
+} 
 
 void main() {
     uint gid = gl_GlobalInvocationID.x;
@@ -96,5 +99,9 @@ void main() {
             tmp[tid] += tmp[tid + s];
         }
         barrier();
+    }
+
+    if (tid == 0) {
+        outputBuffer[d_offset + row] = D_TYPE(tmp[0]);
     }
 }

@@ -2,11 +2,13 @@
 #include <cstdint>
 #include <cmath>
 #include <cassert>
+#include <algorithm>
 #include "quants.hpp"
 
 #if defined(__ARM_NEON)
     #include <arm_neon.h>
 #endif
+#include <iostream>
 
 int getNumbersPerBatch(FloatType type) {
     switch (type) {
@@ -174,6 +176,74 @@ void dequantizeQ40Row(const BlockQ40* x, float* y, int k) {
 
             y[i * qk + j] = x0 * d;
             y[i * qk + j + qk / 2] = x1 * d;
+        }
+    }
+#endif
+}
+
+void quantizeQ40Row(float* input, BlockQ40* output, int k, unsigned int nThreads, unsigned int threadIndex) {
+    assert(k % QK40 == 0);
+
+    const int nBlocks = k / QK40;
+    const int blocksPerThread = nBlocks / nThreads;
+    const int sk = blocksPerThread * QK40;
+    const int currentThreadBlocks = blocksPerThread + (threadIndex == nThreads - 1 ? nBlocks % nThreads : 0);
+
+    const float* x = &input[sk * threadIndex];
+    BlockQ40* y = &output[blocksPerThread * threadIndex];
+
+#if defined(__ARM_NEON)
+    float dBuf[4];
+
+    for (int i = 0; i < currentThreadBlocks; i++) {
+        // Calculate group max and min
+        float group[QK40];
+        float groupAbs[QK40];
+        for (int j = 0; j < QK40; ++j) {
+            group[j] = x[i * QK40 + j];
+            groupAbs[j] = fabs(group[j]);
+        }
+
+        float gmax = *std::max_element(groupAbs, groupAbs + QK40);
+        float gmin = -(*std::max_element(group, group + QK40));
+
+        float delta = std::max(gmax, gmin) / -8;
+        float idelta = (delta != 0) ? 1.0f / delta : 0;
+
+        y[i].d = convertF32ToF16(delta);
+
+        // Quantize the group
+        for (int j = 0; j < QK40 / 2; ++j) {
+            int x0 = std::round(group[j] * idelta + 8.5f);
+            int x1 = std::round(group[j + QK40 / 2] * idelta + 8.5f);
+            x0 = std::min(x0, 15);
+            x1 = std::min(x1, 15);
+            y[i].qs[j] = (x0 & 0x0F) | ((x1 & 0x0F) << 4);
+        }
+    }
+#else
+    for (int i = 0; i < currentThreadBlocks; i++) {
+        float group[QK40];
+        float groupAbs[QK40];
+        for (int j = 0; j < QK40; ++j) {
+            group[j] = x[i * QK40 + j];
+            groupAbs[j] = fabs(group[j]);
+        }
+
+        float gmax = *std::max_element(groupAbs, groupAbs + QK40);
+        float gmin = -(*std::max_element(group, group + QK40));
+
+        float delta = std::max(gmax, gmin) / -8;
+        float idelta = (delta != 0) ? 1.0f / delta : 0;
+
+        y[i].d = convertF32ToF16(delta);
+
+        for (int j = 0; j < QK40 / 2; ++j) {
+            int x0 = std::round(group[j] * idelta + 8.5f);
+            int x1 = std::round(group[j + QK40 / 2] * idelta + 8.5f);
+            x0 = std::min(x0, 15);
+            x1 = std::min(x1, 15);
+            y[i].qs[j] = (x0 & 0x0F) | ((x1 & 0x0F) << 4);
         }
     }
 #endif

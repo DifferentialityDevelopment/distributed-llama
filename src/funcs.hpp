@@ -2,6 +2,7 @@
 #define FUNCS_HPP
 
 #include "quants.hpp"
+#include <pthread.h>
 
 #define SPLIT_RANGE_TO_THREADS(varStart, varEnd, rangeStart, rangeEnd, nThreads, threadIndex) \
     const unsigned int rangeLen = (rangeEnd - rangeStart); \
@@ -13,6 +14,7 @@
 /*
  * Explanation of MatmulThreadInfo members:
  * - pthread_t handler: Thread handler used for threading operations.
+ * - vulkan context: Pointer to vulkan context
  * - float* output: Pointer to the output array where the result of matrix multiplication is stored.
  * - void* input: Pointer to the input data (either float or quantized).
  * - void* weights: Pointer to the weight data (either float or quantized).
@@ -21,6 +23,9 @@
  * - int de: End index (exclusive) of the output array slice that the thread will compute.
  */
 struct MatmulThreadInfo {
+    #ifdef VULKAN
+    void* vulkan;
+    #endif
     pthread_t handler;
     float* output;
     void* input;

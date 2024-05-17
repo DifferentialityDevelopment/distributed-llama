@@ -1,5 +1,6 @@
 #define VK_USE_PLATFORM_XCB_KHR
 #include <cstdio>
+#include <cassert>
 #include <iostream>
 #include <cstdlib>
 #include <cstring>
@@ -15,7 +16,7 @@
 // Create an array to map enum values to struct instances
 std::unordered_map<VulkanPipelineType, std::string> shaderPathMap = {
     {F32_F32, "./shaders/matmulF32.spv"},
-    {Q40_F32, "./shaders/matmulQ40.spv"}
+    {Q40_Q80, "./shaders/matmulQ40Q80.spv"}
 };
 
 // Validation layers to enable
@@ -25,7 +26,8 @@ const std::vector<const char*> validationLayers = {
 
 // Enabled extensions
 const char* enabledExtensions[] = {
-    VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME
+    VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
+    //VK_AMD_GPU_SHADER_HALF_FLOAT_EXTENSION_NAME
 };
 
 std::vector<char> readFile(const std::string& filename) {
@@ -85,13 +87,12 @@ uint32_t findMemoryType(VkPhysicalDevice &physicalDevice, uint32_t typeFilter, V
     throw std::runtime_error("Failed to find suitable memory type!");
 }
 
-void matmulVulkanF32(MatmulVulkanInfo* a, VulkanPipelineType pipelineType){
-    VulkanContext* vulkan = a->vulkan;
+void matmulVulkanF32(MatmulThreadInfo* a, VulkanPipelineType pipelineType) {
+    VulkanContext* vulkan = (VulkanContext*)a->vulkan;
 
     VulkanPipeline* pipeline = vulkan->getPipeline(pipelineType);
 
-    printf("Create the buffers\n");
-    // Create the buffers
+    #pragma region // Create the buffers
     VkBufferCreateInfo weightsBufferInfo = {};
     weightsBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     weightsBufferInfo.size = a->n * (a->de - a->ds) * sizeof(float);
@@ -121,9 +122,9 @@ void matmulVulkanF32(MatmulVulkanInfo* a, VulkanPipelineType pipelineType){
     vkCreateBuffer(vulkan->device, &inputBufferInfo, nullptr, &inputBuffer);
     vkCreateBuffer(vulkan->device, &outputBufferInfo, nullptr, &outputBuffer);
     vkCreateBuffer(vulkan->device, &matMulBufferInfo, nullptr, &matMulBuffer);
+    #pragma endregion
 
-    printf("Get memory requirements for the buffers\n");
-    // Get memory requirements for the buffers
+    #pragma region // Get memory requirements for the buffers 
     VkMemoryRequirements memRequirementsWeights;
     vkGetBufferMemoryRequirements(vulkan->device, weightsBuffer, &memRequirementsWeights);
     VkMemoryRequirements memRequirementsInput;
@@ -132,46 +133,45 @@ void matmulVulkanF32(MatmulVulkanInfo* a, VulkanPipelineType pipelineType){
     vkGetBufferMemoryRequirements(vulkan->device, outputBuffer, &memoryRequirementsOutput);
     VkMemoryRequirements memoryRequirementsMatMulInfo;
     vkGetBufferMemoryRequirements(vulkan->device, matMulBuffer, &memoryRequirementsMatMulInfo);
-
-    // Get memory allocation requirements
-    printf("Get memory allocation requirements 1\n");
+    
     VkMemoryAllocateInfo allocInfoWeights = {};
     allocInfoWeights.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     allocInfoWeights.allocationSize = memRequirementsWeights.size;
     allocInfoWeights.memoryTypeIndex = findMemoryType(vulkan->physicalDevices[0], memRequirementsWeights.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    printf("Get memory allocation requirements 2\n");
+    
     VkMemoryAllocateInfo allocInfoInput = {};
     allocInfoInput.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     allocInfoInput.allocationSize = memRequirementsInput.size;
     allocInfoInput.memoryTypeIndex = findMemoryType(vulkan->physicalDevices[0], memRequirementsInput.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    printf("Get memory allocation requirements 3\n");
+    
     VkMemoryAllocateInfo allocInfoOutput = {};
     allocInfoOutput.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     allocInfoOutput.allocationSize = memoryRequirementsOutput.size;
     allocInfoOutput.memoryTypeIndex = findMemoryType(vulkan->physicalDevices[0], memoryRequirementsOutput.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    printf("Get memory allocation requirements 4\n");
+    
     VkMemoryAllocateInfo allocInfoMatMul = {};
     allocInfoMatMul.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     allocInfoMatMul.allocationSize = memoryRequirementsMatMulInfo.size;
     allocInfoMatMul.memoryTypeIndex = findMemoryType(vulkan->physicalDevices[0], memoryRequirementsMatMulInfo.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    #pragma endregion
 
-    printf("Allocate and map memory for the buffers\n");
+    #pragma region // Allocate and map memory for the buffers
     //Allocate and map memory for the buffers
     VkDeviceMemory weightsBufferMemory, inputBufferMemory, outputBufferMemory, matMulBufferMemory;
     vkAllocateMemory(vulkan->device, &allocInfoWeights, nullptr, &weightsBufferMemory);
     vkAllocateMemory(vulkan->device, &allocInfoInput, nullptr, &inputBufferMemory);
     vkAllocateMemory(vulkan->device, &allocInfoOutput, nullptr, &outputBufferMemory);
     vkAllocateMemory(vulkan->device, &allocInfoMatMul, nullptr, &matMulBufferMemory);
+    #pragma endregion
 
-    printf("Bind the memory to the buffers\n");
-    // Bind the memory to the buffers
+    #pragma region // Bind the memory to the buffers
     vkBindBufferMemory(vulkan->device, weightsBuffer, weightsBufferMemory, 0);
     vkBindBufferMemory(vulkan->device, inputBuffer, inputBufferMemory, 0);
     vkBindBufferMemory(vulkan->device, outputBuffer, outputBufferMemory, 0);
     vkBindBufferMemory(vulkan->device, matMulBuffer, matMulBufferMemory, 0);
+    #pragma endregion
 
-    printf("Copy the weights to GPU memory\n");
-    // Copy the weights to GPU memory
+    #pragma region //Copy the weights to GPU memory
     float* weightsData;
     VkResult result = vkMapMemory(vulkan->device, weightsBufferMemory, 0, weightsBufferInfo.size, 0, (void**)&weightsData);
     if (result != VK_SUCCESS) {
@@ -179,9 +179,9 @@ void matmulVulkanF32(MatmulVulkanInfo* a, VulkanPipelineType pipelineType){
     }
     memcpy(weightsData, a->weights, weightsBufferInfo.size);
     vkUnmapMemory(vulkan->device, weightsBufferMemory);
+    #pragma endregion
     
-    printf("Copy the input to GPU memory\n");
-    // Copy the input to GPU memory
+    #pragma region // Copy the input to GPU memory
     float* inputData;
     result = vkMapMemory(vulkan->device, inputBufferMemory, 0, inputBufferInfo.size, 0, (void**)&inputData);
     if (result != VK_SUCCESS) {
@@ -189,14 +189,14 @@ void matmulVulkanF32(MatmulVulkanInfo* a, VulkanPipelineType pipelineType){
     }
     memcpy(inputData, a->input, inputBufferInfo.size);
     vkUnmapMemory(vulkan->device, inputBufferMemory);
+    #pragma endregion
     
+    #pragma region //Copy the matmul info to GPU memory
     MatMulInfo matmulInfo;
     matmulInfo.n = a->n;
     matmulInfo.de = a->de;
     matmulInfo.ds = a->ds;
 
-    printf("Copy the matmul info to GPU memory\n");
-    // Copy the matmul info to GPU memory
     void* matMulData;
     result = vkMapMemory(vulkan->device, matMulBufferMemory, 0, matMulBufferInfo.size, 0, (void**)&matMulData);
     if (result != VK_SUCCESS) {
@@ -204,16 +204,16 @@ void matmulVulkanF32(MatmulVulkanInfo* a, VulkanPipelineType pipelineType){
     }
     memcpy(matMulData, &matmulInfo, matMulBufferInfo.size);
     vkUnmapMemory(vulkan->device, matMulBufferMemory);
+    #pragma endregion
 
-    printf("Bind the buffers to the descriptor sets\n");
-    // Bind the buffers to the descriptor sets
+    #pragma region // Bind the buffers to the descriptor sets
     VkDescriptorBufferInfo weightsDescriptorBufferInfo = { weightsBuffer, 0, VK_WHOLE_SIZE };
     VkDescriptorBufferInfo inputDescriptorBufferInfo = { inputBuffer, 0, VK_WHOLE_SIZE };
     VkDescriptorBufferInfo outputDescriptorBufferInfo = { outputBuffer, 0, VK_WHOLE_SIZE };
     VkDescriptorBufferInfo matmulDescriptorBufferInfo = { matMulBuffer, 0, VK_WHOLE_SIZE };
+    #pragma endregion
 
-    printf("Write and update the descriptor sets\n");
-    // Write and update the descriptor sets
+    #pragma region // Write and update the descriptor sets
     VkWriteDescriptorSet writeDescriptorSet1[3] = {};
     VkWriteDescriptorSet writeDescriptorSet2[1] = {};
 
@@ -248,46 +248,256 @@ void matmulVulkanF32(MatmulVulkanInfo* a, VulkanPipelineType pipelineType){
     VkCommandBufferBeginInfo cmdBufferBeginInfo = {};
     cmdBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     cmdBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    #pragma endregion
         
-    printf("Create a pointer to the commandBuffer member\n");
-    // Create a pointer to the commandBuffer member
+    #pragma region // Create a pointer to the commandBuffer member
     VkCommandBuffer commandBuffer = pipeline->commandBuffer;
-
     vkBeginCommandBuffer(commandBuffer, &cmdBufferBeginInfo);
+    #pragma endregion
 
-    printf("Bind pipeline and descriptor sets to the command buffer\n");
-    // Bind pipeline and descriptor sets to the command buffer
+    #pragma region // Bind pipeline and descriptor sets to the command buffer
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline->pipeline);
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline->pipelineLayout, 0, 2, pipeline->descriptorSets, 0, nullptr);
+    #pragma endregion
 
+    #pragma region // Dispatch the command buffer and stop recording
     uint numGroups = (a->de - a->ds + 15) / 16;  // Make sure to cover all elements
     vkCmdDispatch(commandBuffer, numGroups, 1, 1);
-
     vkEndCommandBuffer(commandBuffer);
-    
-    printf("Wait for the compute shader to finish\n");
-    // Wait for the compute shader to finish
+    #pragma endregion
+
+    #pragma region // Wait for the compute shader to finish
     VkSubmitInfo submitInfo = {};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &pipeline->commandBuffer;
-
     vkQueueSubmit(vulkan->computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
     vkQueueWaitIdle(vulkan->computeQueue);
+    #pragma endregion
 
-    printf("Get the output from the compute shader\n");
-    //Get the output from the compute shader
+    #pragma region //Get the output from the compute shader
     float* outputData;
-    printf("Output Data: %d\n", (int)sizeof(outputData));
     result = vkMapMemory(vulkan->device, outputBufferMemory, 0, outputBufferInfo.size, 0, (void**)&outputData);
     if (result != VK_SUCCESS) {
         std::cerr << "Failed to map matrix info memory" << std::endl;
     }
-    printf("Output Data: %d\n", (int)sizeof(outputData));
     memcpy(a->output, outputData, outputBufferInfo.size);
-    printf("Output Data: %d\n", (int)sizeof(outputData));
     vkUnmapMemory(vulkan->device, outputBufferMemory);
-    printf("Processed output using vulkan!\n");
+    #pragma endregion
+}
+
+void matmulVulkanQ40vQ80(MatmulThreadInfo* a, VulkanPipelineType pipelineType) {
+    VulkanContext* vulkan = (VulkanContext*)a->vulkan;
+
+    VulkanPipeline* pipeline = vulkan->getPipeline(pipelineType);
+
+    #pragma region // Create buffers
+    // Buffer creation info template
+    VkBufferCreateInfo bufferCreateInfo = {};
+    bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferCreateInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VkBuffer weightsBuffer, inputBuffer, outputBuffer, matMulBuffer;
+    
+    uint weightsSize = (a->n * (a->de - a->ds) * sizeof(BlockQ40)) / QK40;
+    uint inputSize = a->n * sizeof(BlockQ80);
+
+    bufferCreateInfo.size = weightsSize;
+    printf("WeightsBuffer size: %d\n", (int)bufferCreateInfo.size);
+    if (vkCreateBuffer(vulkan->device, &bufferCreateInfo, nullptr, &weightsBuffer) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create weights buffer!");
+    }
+    else{
+        std::cout << "Created weights buffer for Q40" << std::endl;
+    }
+
+    bufferCreateInfo.size = inputSize;
+    if (vkCreateBuffer(vulkan->device, &bufferCreateInfo, nullptr, &inputBuffer) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create input buffer!");
+    }
+    else{
+        std::cout << "Created input buffer for Q80" << std::endl;
+    }
+
+    bufferCreateInfo.size = (a->de - a->ds) * sizeof(float);
+    if (vkCreateBuffer(vulkan->device, &bufferCreateInfo, nullptr, &outputBuffer) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create output buffer!");
+    }
+    else{
+        std::cout << "Created output buffer" << std::endl;
+    }
+
+    bufferCreateInfo.size = sizeof(MatMulInfo);
+    bufferCreateInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+    if (vkCreateBuffer(vulkan->device, &bufferCreateInfo, nullptr, &matMulBuffer) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create matmul info buffer!");
+    }
+    else{
+        std::cout << "Created matmul info buffer" << std::endl;
+    }
+    #pragma endregion
+
+    #pragma region // Get memory requirements for the buffers 
+    VkMemoryRequirements memRequirementsWeights;
+    vkGetBufferMemoryRequirements(vulkan->device, weightsBuffer, &memRequirementsWeights);
+    VkMemoryRequirements memRequirementsInput;
+    vkGetBufferMemoryRequirements(vulkan->device, inputBuffer, &memRequirementsInput);
+    VkMemoryRequirements memoryRequirementsOutput;
+    vkGetBufferMemoryRequirements(vulkan->device, outputBuffer, &memoryRequirementsOutput);
+    VkMemoryRequirements memoryRequirementsMatMulInfo;
+    vkGetBufferMemoryRequirements(vulkan->device, matMulBuffer, &memoryRequirementsMatMulInfo);
+
+    // Memory allocation and binding template
+    VkMemoryRequirements memRequirements;
+    VkMemoryAllocateInfo allocInfo = {};
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+
+    auto allocateAndBindMemory = [&](VkBuffer buffer, VkDeviceMemory& bufferMemory) {
+        vkGetBufferMemoryRequirements(vulkan->device, buffer, &memRequirements);
+        allocInfo.allocationSize = memRequirements.size;
+        allocInfo.memoryTypeIndex = findMemoryType(vulkan->physicalDevices[0], memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+        if (vkAllocateMemory(vulkan->device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to allocate buffer memory!");
+        }
+
+        vkBindBufferMemory(vulkan->device, buffer, bufferMemory, 0);
+    };
+
+    // Allocate and bind memory
+    VkDeviceMemory weightsBufferMemory, inputBufferMemory, outputBufferMemory, matMulBufferMemory;
+    allocateAndBindMemory(weightsBuffer, weightsBufferMemory);
+    allocateAndBindMemory(inputBuffer, inputBufferMemory);
+    allocateAndBindMemory(outputBuffer, outputBufferMemory);
+    allocateAndBindMemory(matMulBuffer, matMulBufferMemory);
+    #pragma endregion
+    
+    #pragma region // Convert and copy the data to GPU memory
+    auto mapAndCopyData = [&](VkDeviceMemory bufferMemory, const void* data, VkDeviceSize size) {
+        void* mappedData;
+        if (vkMapMemory(vulkan->device, bufferMemory, 0, size, 0, (void**)&mappedData) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to map buffer memory!");
+        }
+        std::memcpy(mappedData, data, size);
+        vkUnmapMemory(vulkan->device, bufferMemory);
+    };
+
+    void* weightsData;
+    if (vkMapMemory(vulkan->device, weightsBufferMemory, 0, weightsSize, 0, (void**)&weightsData) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to map buffer memory!");
+    }
+    std::memcpy(weightsData, a->weights, weightsSize);
+    vkUnmapMemory(vulkan->device, weightsBufferMemory);
+    
+    //mapAndCopyData(weightsBufferMemory, a->weights, a->n * (a->de - a->ds) * sizeof(BlockQ40));
+    mapAndCopyData(inputBufferMemory, a->input, inputSize);
+    MatMulInfo matmulInfo = { a->n, a->ds, a->de };
+    mapAndCopyData(matMulBufferMemory, &matmulInfo, sizeof(MatMulInfo));
+    #pragma endregion
+
+    #pragma region // Bind the buffers to the descriptor sets
+    VkDescriptorBufferInfo weightsDescriptorBufferInfo = { weightsBuffer, 0, VK_WHOLE_SIZE };
+    VkDescriptorBufferInfo inputDescriptorBufferInfo = { inputBuffer, 0, VK_WHOLE_SIZE };
+    VkDescriptorBufferInfo outputDescriptorBufferInfo = { outputBuffer, 0, VK_WHOLE_SIZE };
+    VkDescriptorBufferInfo matmulDescriptorBufferInfo = { matMulBuffer, 0, VK_WHOLE_SIZE };
+    #pragma endregion
+
+    #pragma region // Write and update the descriptor sets
+    VkWriteDescriptorSet writeDescriptorSet1[3] = {};
+    VkWriteDescriptorSet writeDescriptorSet2[1] = {};
+
+    writeDescriptorSet1[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeDescriptorSet1[0].dstBinding = 0;
+    writeDescriptorSet1[0].dstSet = pipeline->descriptorSets[0];
+    writeDescriptorSet1[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writeDescriptorSet1[0].descriptorCount = 1;
+    writeDescriptorSet1[0].pBufferInfo = &weightsDescriptorBufferInfo;
+    writeDescriptorSet1[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeDescriptorSet1[1].dstBinding = 1;
+    writeDescriptorSet1[1].dstSet = pipeline->descriptorSets[0];
+    writeDescriptorSet1[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writeDescriptorSet1[1].descriptorCount = 1;
+    writeDescriptorSet1[1].pBufferInfo = &inputDescriptorBufferInfo;
+    writeDescriptorSet1[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeDescriptorSet1[2].dstBinding = 2;
+    writeDescriptorSet1[2].dstSet = pipeline->descriptorSets[0];
+    writeDescriptorSet1[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writeDescriptorSet1[2].descriptorCount = 1;
+    writeDescriptorSet1[2].pBufferInfo = &outputDescriptorBufferInfo;
+    vkUpdateDescriptorSets(vulkan->device, 3, writeDescriptorSet1, 0, nullptr);
+    
+    writeDescriptorSet2[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeDescriptorSet2[0].dstBinding = 0; 
+    writeDescriptorSet2[0].dstSet = pipeline->descriptorSets[1];
+    writeDescriptorSet2[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER; 
+    writeDescriptorSet2[0].descriptorCount = 1;
+    writeDescriptorSet2[0].pBufferInfo = &matmulDescriptorBufferInfo;
+    vkUpdateDescriptorSets(vulkan->device, 1, writeDescriptorSet2, 0, nullptr);
+
+    VkCommandBufferBeginInfo cmdBufferBeginInfo = {};
+    cmdBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    cmdBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    #pragma endregion
+        
+    #pragma region // Create a pointer to the commandBuffer member
+    VkCommandBuffer commandBuffer = pipeline->commandBuffer;
+    vkBeginCommandBuffer(commandBuffer, &cmdBufferBeginInfo);
+    #pragma endregion
+
+    #pragma region // Bind pipeline and descriptor sets to the command buffer
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline->pipeline);
+    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline->pipelineLayout, 0, 2, pipeline->descriptorSets, 0, nullptr);
+    #pragma endregion
+
+    #pragma region // Dispatch the command buffer and stop recording
+    uint numGroups = (a->de - a->ds + 15) / 16;  // Make sure to cover all elements
+    vkCmdDispatch(commandBuffer, numGroups, 1, 1);
+
+    // Add a memory barrier to ensure all writes to the output buffer are visible
+    VkBufferMemoryBarrier bufferMemoryBarrier = {};
+    bufferMemoryBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    bufferMemoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    bufferMemoryBarrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    bufferMemoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    bufferMemoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    bufferMemoryBarrier.buffer = outputBuffer;
+    bufferMemoryBarrier.offset = 0;
+    bufferMemoryBarrier.size = VK_WHOLE_SIZE;
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
+        0,
+        0, nullptr,
+        1, &bufferMemoryBarrier,
+        0, nullptr
+    );
+
+    vkEndCommandBuffer(commandBuffer);
+    #pragma endregion
+
+    #pragma region // Wait for the compute shader to finish
+    VkSubmitInfo submitInfo = {};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &pipeline->commandBuffer;
+    vkQueueSubmit(vulkan->computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(vulkan->computeQueue);
+    #pragma endregion
+
+    #pragma region // Get the output from the compute shader
+    
+    void* outputData;
+    uint outputSize = (a->de - a->ds) * sizeof(float);
+    if (vkMapMemory(vulkan->device, outputBufferMemory, 0, outputSize, 0, (void**)&outputData) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to map buffer memory!");
+    }
+    std::memcpy(a->output, outputData, outputSize);
+    vkUnmapMemory(vulkan->device, outputBufferMemory);
+
+    //mapAndCopyData(outputBufferMemory, a->output, (a->de - a->ds) * sizeof(float));
+    #pragma endregion
 }
 
 void matmulVulkan(VulkanContext* vulkan, FloatType weightsFloatType, FloatType inputFloatType, float* output, void* input, void* weights, int n, int d, unsigned int nThreads, unsigned int threadIndex){
@@ -304,6 +514,7 @@ void matmulVulkan(VulkanContext* vulkan, FloatType weightsFloatType, FloatType i
     * - int de: End index (exclusive) of the output array slice that the thread will compute.
     */
     MatmulThreadInfo s;
+    s.vulkan = vulkan;
     s.output = output;
     s.input = input;
     s.weights = weights;
@@ -313,16 +524,8 @@ void matmulVulkan(VulkanContext* vulkan, FloatType weightsFloatType, FloatType i
 
     if (inputFloatType == F32) {
         if (weightsFloatType == F32) {
-            MatmulVulkanInfo v;
-            v.vulkan = vulkan;
-            v.output = output;
-            v.input = input;
-            v.weights = weights;
-            v.n = n;
-            v.ds = ds;
-            v.de = de;
             //matmulF32(&s);
-            matmulVulkanF32(&v, VulkanPipelineType::F32_F32);
+            matmulVulkanF32(&s, VulkanPipelineType::F32_F32);
             return;
         }
         if (weightsFloatType == F16) {
@@ -339,7 +542,9 @@ void matmulVulkan(VulkanContext* vulkan, FloatType weightsFloatType, FloatType i
         }
     } else if (inputFloatType == Q80) {
         if (weightsFloatType == Q40) {
-            matmulQ40vQ80(&s);
+            //printf("W:Q40 - I:Q80\n");
+            //matmulQ40vQ80(&s);
+            matmulVulkanQ40vQ80(&s, VulkanPipelineType::Q40_Q80);
             return;
         }
         if (weightsFloatType == Q80) {
@@ -350,6 +555,25 @@ void matmulVulkan(VulkanContext* vulkan, FloatType weightsFloatType, FloatType i
     
     printf("Success\n");
     exit(1);
+}
+
+void VulkanContext::printPhysicalDeviceMemoryProperties() {
+    VkPhysicalDeviceMemoryProperties memProperties;
+    vkGetPhysicalDeviceMemoryProperties(physicalDevices[0], &memProperties);
+
+    std::cout << "Memory Heaps: " << memProperties.memoryHeapCount << std::endl;
+    for (uint32_t i = 0; i < memProperties.memoryHeapCount; ++i) {
+        std::cout << "Heap " << i << ": " << memProperties.memoryHeaps[i].size / (1024 * 1024) << " MB" << std::endl;
+    }
+
+    std::cout << "Memory Types: " << memProperties.memoryTypeCount << std::endl;
+    for (uint32_t i = 0; i < memProperties.memoryTypeCount; ++i) {
+        std::cout << "Type " << i << ": " << memProperties.memoryTypes[i].heapIndex << " " 
+                  << ((memProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) ? "Device Local" : "")
+                  << ((memProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) ? " Host Visible" : "")
+                  << ((memProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) ? " Host Coherent" : "")
+                  << std::endl;
+    }
 }
 
 void VulkanContext::createInstance() { 
@@ -364,11 +588,9 @@ void VulkanContext::createInstance() {
     VkInstanceCreateInfo createInfo = {};
     createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     createInfo.pApplicationInfo = &appInfo;
-    if (sizeof(enabledExtensions) > 0){
-        createInfo.enabledExtensionCount = sizeof(enabledExtensions) / sizeof(enabledExtensions[0]);
-        createInfo.ppEnabledExtensionNames = enabledExtensions;
-    }
-    createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
+    createInfo.enabledExtensionCount = 1;
+    createInfo.ppEnabledExtensionNames = enabledExtensions;
+    createInfo.enabledLayerCount = 1;
     createInfo.ppEnabledLayerNames = validationLayers.data();
 
     VkResult result = vkCreateInstance(&createInfo, nullptr, &instance);
@@ -386,7 +608,7 @@ void VulkanContext::getDevice() {
     if (deviceCount == 0) {
         std::cerr << "Failed to find any GPUs with Vulkan support." << std::endl;
         vkDestroyInstance(instance, nullptr);
-        throw;
+        throw std::runtime_error("No GPUs with Vulkan support found");
     }
 
     physicalDevices = std::vector<VkPhysicalDevice>(deviceCount);
@@ -400,11 +622,61 @@ void VulkanContext::getDevice() {
     VkPhysicalDeviceFeatures deviceFeatures;
     vkGetPhysicalDeviceFeatures(physicalDevices[0], &deviceFeatures);
 
+    // Query device extension properties
+    uint32_t extensionCount = 0;
+    vkEnumerateDeviceExtensionProperties(physicalDevices[0], nullptr, &extensionCount, nullptr);
+    std::vector<VkExtensionProperties> availableExtensions(extensionCount);
+    vkEnumerateDeviceExtensionProperties(physicalDevices[0], nullptr, &extensionCount, availableExtensions.data());
+
+    // Check if VK_KHR_8bit_storage is supported
+    bool is8BitStorageSupported = false;
+    for (const auto& extension : availableExtensions) {
+        if (strcmp(extension.extensionName, VK_KHR_8BIT_STORAGE_EXTENSION_NAME) == 0) {
+            is8BitStorageSupported = true;
+            break;
+        }
+    }
+
+    if (!is8BitStorageSupported) {
+        std::cerr << "VK_KHR_8bit_storage extension is not supported by this device." << std::endl;
+        vkDestroyInstance(instance, nullptr);
+        throw std::runtime_error("VK_KHR_8bit_storage extension not supported");
+    }
+
+    // List of required extensions
+    const char* enabledExtensions[] = {
+        VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME,
+        VK_KHR_16BIT_STORAGE_EXTENSION_NAME,
+        VK_KHR_8BIT_STORAGE_EXTENSION_NAME
+    };
+
+    // Query the physical device features
+    VkPhysicalDeviceFeatures2 physicalDeviceFeatures2 = {};
+    physicalDeviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+
+    VkPhysicalDeviceVulkan12Features vk12Features = {};
+    vk12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+
+    VkPhysicalDevice16BitStorageFeatures storage16BitFeatures = {};
+    storage16BitFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES;
+
+    // Chain the features
+    storage16BitFeatures.pNext = &vk12Features;
+    physicalDeviceFeatures2.pNext = &storage16BitFeatures;
+
+    // Query physical device features2
+    vkGetPhysicalDeviceFeatures2(physicalDevices[0], &physicalDeviceFeatures2);
+
+    // Enable the required features
+    vk12Features.storageBuffer8BitAccess = VK_TRUE;
+    vk12Features.uniformAndStorageBuffer8BitAccess = VK_TRUE;
+    storage16BitFeatures.storageBuffer16BitAccess = VK_TRUE;
+
     // Print physical device properties
     std::cout << "Device Name: " << deviceProperties.deviceName << std::endl;
     std::cout << "API Version: " << VK_VERSION_MAJOR(deviceProperties.apiVersion) << "."
-        << VK_VERSION_MINOR(deviceProperties.apiVersion) << "."
-        << VK_VERSION_PATCH(deviceProperties.apiVersion) << std::endl;
+              << VK_VERSION_MINOR(deviceProperties.apiVersion) << "."
+              << VK_VERSION_PATCH(deviceProperties.apiVersion) << std::endl;
 
     // Query device queue families
     uint32_t queueFamilyCount = 0;
@@ -424,7 +696,7 @@ void VulkanContext::getDevice() {
     if (computeQueueFamilyIndex == -1) {
         std::cerr << "No compute queue family found." << std::endl;
         vkDestroyInstance(instance, nullptr);
-        throw;
+        throw std::runtime_error("No compute queue family found");
     }
 
     // Create logical device
@@ -439,13 +711,15 @@ void VulkanContext::getDevice() {
     deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     deviceCreateInfo.queueCreateInfoCount = 1;
     deviceCreateInfo.pQueueCreateInfos = &queueCreateInfo;
-    deviceCreateInfo.pEnabledFeatures = &deviceFeatures;
+    deviceCreateInfo.enabledExtensionCount = sizeof(enabledExtensions) / sizeof(enabledExtensions[0]);
+    deviceCreateInfo.ppEnabledExtensionNames = enabledExtensions;
+    deviceCreateInfo.pNext = &physicalDeviceFeatures2; // Chain the features
 
     VkResult result = vkCreateDevice(physicalDevices[0], &deviceCreateInfo, nullptr, &device);
     if (result != VK_SUCCESS) {
         std::cerr << "Failed to create logical device." << std::endl;
         vkDestroyInstance(instance, nullptr);
-        throw;
+        throw std::runtime_error("Failed to create logical device");
     }
 
     // Get the compute queue
@@ -457,10 +731,16 @@ VkShaderModule VulkanContext::loadComputeShaderModule(const std::string &shaderP
     return createShaderModule(device, shaderCode);
 }
 
-void VulkanContext::createPipeline(VulkanPipelineType pipelineType) {
+void VulkanContext::createPipeline(VulkanPipelineType pipelineType, const std::string &name) {
     VulkanPipeline vulkanPipeline = {};
-    vulkanPipeline.weightsFloatType = FloatType::F32;
-    vulkanPipeline.inputFloatType = FloatType::F32;
+    if(pipelineType == VulkanPipelineType::F32_F32){
+        vulkanPipeline.weightsFloatType = FloatType::F32;
+        vulkanPipeline.inputFloatType = FloatType::F32;
+    }
+    else if(pipelineType == VulkanPipelineType::Q40_Q80){
+        vulkanPipeline.weightsFloatType = FloatType::Q40;
+        vulkanPipeline.inputFloatType = FloatType::Q80;
+    }
     vulkanPipeline.shaderModule = loadComputeShaderModule(getShaderPath(pipelineType));
     
     // Define the descriptor set layout bindings
@@ -589,6 +869,7 @@ void VulkanContext::createPipeline(VulkanPipelineType pipelineType) {
     vkAllocateCommandBuffers(device, &cmdBufferAllocateInfo, &vulkanPipeline.commandBuffer);
 
     pipelines[pipelineType] = vulkanPipeline;
+    printf("Created pipeline %s\n", name.c_str());
 }
 
 VulkanPipeline* VulkanContext::getPipeline(VulkanPipelineType pipelineType){
@@ -609,6 +890,8 @@ void VulkanContext::initialize() {
     // Get the first* Vulkan enabled device
     getDevice();
 
+    printPhysicalDeviceMemoryProperties();
+
     // Load the matmul F32 compute shader module
     //loadComputeShaderModule("./shaders/matmulF32.spv");
 
@@ -616,10 +899,10 @@ void VulkanContext::initialize() {
     //createDescriptorSetLayout();
 
     // Create the pipeline for the matmul F32 compute shader
-    createPipeline(VulkanPipelineType::F32_F32);
+    createPipeline(VulkanPipelineType::F32_F32, "F32_F32");
 
     // Create the pipeline for the matmul Q40 compute shader
-    createPipeline(VulkanPipelineType::Q40_F32);
+    createPipeline(VulkanPipelineType::Q40_Q80, "Q40_Q80");
 }
 
 VulkanContext::VulkanContext() {

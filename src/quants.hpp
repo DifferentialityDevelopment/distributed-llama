@@ -29,6 +29,7 @@ int getNumbersPerBatch(FloatType type);
 long getBatchBytes(FloatType type, int n, int d);
 float convertF16ToF32(uint16_t value);
 
+void quantizeQ40Row(float* input, BlockQ40* output, int k, unsigned int nThreads, unsigned int threadIndex);
 void dequantizeQ40Row(const BlockQ40* x, float* y, int k);
 void quantizeQ80Row(float* input, BlockQ80* output, int k, unsigned int nThreads, unsigned int threadIndex);
 void dequantizeQ80Row(const BlockQ80* input, float* output, int k, unsigned int nThreads, unsigned int threadIndex);
