@@ -50,6 +50,10 @@ long getBatchBytes(FloatType type, int n, int d) {
 
 float F16ToF32[65536];
 
+float* GetF16ToF32() {
+    return F16ToF32;
+}
+
 // https://gist.github.com/rygorous/2144712
 float _convertF16ToF32(uint16_t value) {
     union F32

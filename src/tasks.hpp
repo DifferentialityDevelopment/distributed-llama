@@ -10,17 +10,13 @@
 #define TASK_TYPE_INFERENCE 0
 #define TASK_TYPE_TRANSFER 1
 
-#ifdef VULKAN
-    #include "vulkan.hpp"
-#endif
-
 struct TransformerContext {
     Transformer* transformer;
     Socket* socket;
     SocketPool* socketPool;
     unsigned int currentBlockIndex;
     #ifdef VULKAN
-    VulkanContext* vulkan;
+    void* vulkan;
     #endif
 };
 
@@ -49,7 +45,7 @@ public:
     Transformer* transformer = ctx->transformer; \
     TransformerBlock* block = transformer->blocks[ctx->currentBlockIndex]; \
     TransformerSpec* spec = transformer->spec; \
-    VulkanContext* vulkan = ctx->vulkan;
+    void* vulkan = ctx->vulkan;
 #else
 #define TASK_VARIABLES \
     TransformerContext* ctx = (TransformerContext*)userData; \

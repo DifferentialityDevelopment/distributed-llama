@@ -13,6 +13,7 @@
 
 /*
  * Explanation of MatmulThreadInfo members:
+ * - ctx: Pointer to TransformerContext.
  * - pthread_t handler: Thread handler used for threading operations.
  * - vulkan context: Pointer to vulkan context
  * - float* output: Pointer to the output array where the result of matrix multiplication is stored.
@@ -23,11 +24,10 @@
  * - int de: End index (exclusive) of the output array slice that the thread will compute.
  */
 struct MatmulThreadInfo {
-    #ifdef VULKAN
-    void* vulkan;
-    #endif
+    void* ctx;
     pthread_t handler;
     float* output;
+    float* debug;
     void* input;
     void* weights;
     int n;

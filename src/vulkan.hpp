@@ -2,11 +2,12 @@
 #define VULKAN_HPP
 
 #include <vulkan/vulkan.h>
-#include "quants.hpp"
 #include <vector>
 #include <unordered_map>
 #include <string>
 #include <array>
+#include "quants.hpp"
+#include "tasks.hpp"
 
 #define SPLIT_RANGE_TO_THREADS(varStart, varEnd, rangeStart, rangeEnd, nThreads, threadIndex) \
     const unsigned int rangeLen = (rangeEnd - rangeStart); \
@@ -19,6 +20,22 @@ struct MatMulInfo {
     int n;
     int ds;
     int de;
+};
+
+enum class LayerElement {
+    QUERY = 0,
+    KEY = 1,
+    VALUE = 2
+};
+
+//hash function for std::pair<int, LayerElement>
+struct pair_hash {
+    template <class T1, class T2>
+    std::size_t operator () (const std::pair<T1,T2>& p) const {
+        auto hash1 = std::hash<T1>{}(p.first);
+        auto hash2 = std::hash<T2>{}(p.second);
+        return hash1 ^ hash2;  // Combine the two hash values
+    }
 };
 
 enum VulkanPipelineType {
@@ -48,12 +65,14 @@ class VulkanContext {
 private:
     VkInstance instance;
     VkApplicationInfo appInfo;
+    std::unordered_map<std::pair<int, LayerElement>, std::pair<VkBuffer, VkDeviceMemory>, pair_hash> bufferMap;
     void initialize();
     void createInstance();
     void getDevice();
     void printPhysicalDeviceMemoryProperties();
     VkShaderModule loadComputeShaderModule(const std::string &shaderPath);
     void createDescriptorSetLayout();
+    bool loadTransformerBlock(int blockIndex, TransformerBlock* block);
     void createPipeline(VulkanPipelineType pipelineType, const std::string &name);
 public:
     VkDevice device;
@@ -62,11 +81,12 @@ public:
     int computeQueueFamilyIndex;
     VkQueue computeQueue;
     std::unordered_map<VulkanPipelineType, VulkanPipeline> pipelines;
-    VulkanContext();
+    VulkanContext(Transformer* transformer);
     ~VulkanContext();
+    std::pair<VkBuffer, VkDeviceMemory>* getLayerBufferData(int blockIndex, LayerElement type);
     VulkanPipeline* getPipeline(VulkanPipelineType pipelineType);
 };
 
-void matmulVulkan(VulkanContext* vulkan, FloatType weightsFloatType, FloatType inputFloatType, float* output, void* input, void* weights, int n, int d, unsigned int nThreads, unsigned int threadIndex);
+void matmulVulkan(TransformerContext* ctx, LayerElement layerElement, FloatType weightsFloatType, FloatType inputFloatType, float* output, void* input, void* weights, int n, int d, unsigned int nThreads, unsigned int threadIndex);
 
 #endif

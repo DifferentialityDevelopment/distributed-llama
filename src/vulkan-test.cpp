@@ -1,12 +1,15 @@
-#include "vulkan.hpp"
-#include "utils.hpp"
-#include "funcs.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
 #include <cassert>
 #include <iostream>
 #include <ostream>
+#include <chrono>
+#include <random>
+#include "transformer.hpp"
+#include "vulkan.hpp"
+#include "utils.hpp"
+#include "funcs.hpp"
 
 // Function to print the contents of an array, useful for debugging
 void printArray(const float* arr, int size, const std::string& name) {
@@ -17,151 +20,207 @@ void printArray(const float* arr, int size, const std::string& name) {
     std::cout << std::endl;
 }
 
-// Function to check if the quantize and dequantize operations are consistent
-bool testQuantizeQ80Row() {
-    printf("testQuantizeQ80Row\n");
-    const int k = QK80;  // Assuming QK40 is the number of elements in a row (should match your setup)
-    float input[k] = { 0, 0.19509, 0.382683, 0.55557, 0.707106, 0.831469, 0.923879, 0.980785, 1, 0.980786, 0.92388, 0.831471, 0.707108, 0.555572, 0.382685, 0.195093, 2.53518e-06, -0.195088, -0.382681, -0.555568, -0.707105, -0.831468, -0.923878, -0.980785, -1, -0.980786, -0.923881, -0.831472, -0.70711, -0.555574, -0.382688, -0.195095 };
-    BlockQ80 output[1];  // Adjust size if your blocks are structured differently
-    float dequantized[k];
-
-    // Print input for verification
-    printArray(input, k, "Input");
-
-    // Quantize the input row
-    quantizeQ80Row(input, output, k, 1, 0);  // Assuming single-threaded operation for simplicity
-
-    // Dequantize the quantized data
-    dequantizeQ80Row(output, dequantized, k, 1, 0);
-
-    // Print dequantized for verification
-    printArray(dequantized, k, "Dequantized");
-
-    // Compare original input with dequantized output
-    float maxError = 0.0f;
-    for (int i = 0; i < k; ++i) {
-        float error = fabs(input[i] - dequantized[i]);
-        if (error > maxError) {
-            maxError = error;
-        }
+void printBlockQ40Row(BlockQ40* row, const std::string& name) {
+    std::cout << name << " [D:"<< row->d << "," << convertF16ToF32(row->d) <<"]" << ": ";
+    float* data = new float[16];
+    dequantizeQ40Row(row, data, 32);
+    for (int i = 0; i < 16; ++i) {
+        std::cout << data[i] << " ";
     }
-
-    std::cout << "Maximum error: " << maxError << std::endl;
-
-    // Define an acceptable error threshold
-    const float errorThreshold = 0.1f;  // Adjust based on your acceptable error tolerance
-
-    return maxError <= errorThreshold;
+    std::cout << std::endl;
 }
 
-// Function to check if the quantize and dequantize operations are consistent
-bool testQuantizeQ40Row() {
-    printf("testQuantizeQ40Row\n");
-    const int k = QK40;  // Assuming QK40 is the number of elements in a row (should match your setup)
-    float input[k] = { 0, 0.19509, 0.382683, 0.55557, 0.707106, 0.831469, 0.923879, 0.980785, 1, 0.980786, 0.92388, 0.831471, 0.707108, 0.555572, 0.382685, 0.195093, 2.53518e-06, -0.195088, -0.382681, -0.555568, -0.707105, -0.831468, -0.923878, -0.980785, -1, -0.980786, -0.923881, -0.831472, -0.70711, -0.555574, -0.382688, -0.195095 };
-    BlockQ40 output[1];  // Adjust size if your blocks are structured differently
-    float dequantized[k];
+void testQuantizeQ40(){
+    const int n = 4096;
+    const int d = 4096;
+    unsigned long long state = 88888888L;
+    float* w = new float[n * d];  // weights matrix
+    
+    //generate fp32 weights
+    int i;
+    for (i = 0; i < n * d; i++) w[i] = randomF32(&state) / 127.0f;
+    
+    // Print some of the FP32 weights
+    printf("FP32 Weights\n");
+    for (int i = 0; i < 32 && i < n * d; i++) {
+        std::cout << w[i] << ", ";
+    }
+    std::cout << "\n";
 
-    // Print input for verification
-    printArray(input, k, "Input");
+    // Quantize the weights to q4
+    int size = getBatchBytes(Q40, n, d);
+    char* wQ4 = new (std::nothrow) char[size];
+    if (!wQ4) {
+        std::cerr << "Memory allocation failed for wQ4." << std::endl;
+        return;
+    }
+    quantizeQ40Row(w, (BlockQ40*)wQ4, n * d, 1, 0);
 
-    // Quantize the input row
-    quantizeQ40Row(input, output, k, 1, 0);  // Assuming single-threaded operation for simplicity
+    // Dequantize the Q40 weights
+    float* wDeq = new float[n * d];
+    dequantizeQ40Row((BlockQ40*)wQ4, wDeq, n * d);
 
-    // Dequantize the quantized data
-    dequantizeQ40Row(output, dequantized, k);
-
-    // Print dequantized for verification
-    printArray(dequantized, k, "Dequantized");
-
-    // Compare original input with dequantized output
-    float maxError = 0.0f;
-    for (int i = 0; i < k; ++i) {
-        float error = fabs(input[i] - dequantized[i]);
-        if (error > maxError) {
-            maxError = error;
+    // Print some of the dequantized Q40 weights
+    printf("Dequantized Q40 Weights\n");
+    uint diff = 0;
+    for (int i = 0; i < 32; i++) {
+        std::cout << wDeq[i] << ", ";
+        if(std::fabs(wDeq[i]-w[i]) > 0.001){
+            diff++;
         }
     }
+    std::cout << "\n";
+    std::cout << "Diff: " << diff << std::endl;
 
-    std::cout << "Maximum error: " << maxError << std::endl;
+    delete[] wQ4;
+    delete[] wDeq;
+}
 
-    // Define an acceptable error threshold
-    const float errorThreshold = 0.1f;  // Adjust based on your acceptable error tolerance
+float getRandomFloat() {
+    // Create a random device and seed the generator
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    // Define a uniform distribution in the range [0.0, 1.0)
+    std::uniform_real_distribution<float> dis(0.0f, 1.0f);
 
-    return maxError <= errorThreshold;
+    // Generate and return a random float
+    return dis(gen);
 }
 
 void testMatmulQ80(VulkanContext* vulkan) {
-    const int n = 512;
-    const int d = 256;
+    const int n = 2048;
+    const int d = 2048;
+    unsigned long long wstate = 46546541L;
+    unsigned long long istate = 95874562L;
+    float* x = new float[n];  // input matrix
+    float* w = new float[n * d];  // weights matrix
+    //float outputCPUComparison[d]; // output matrix for CPU
+    float outputCPUQ4[d]; // output matrix for CPU
+    float outputVulkanQ4[d]; // output matrix for Vulkan
+    //float outputCPUQ8[d]; // output matrix for CPU
+
+    TransformerContext* ctx = new TransformerContext();
+    ctx->vulkan = vulkan;
+
+    //float outputVulkanQ8[d]; // output matrix for Vulkan
+    int i;
+    for (i = 0; i < n; i++){
+        x[i] = getRandomFloat() / 127.0f;//randomF32(&istate) / 127.0f;
+    }
+    for (i = 0; i < n * d; i++){
+        w[i] = getRandomFloat() / 127.0f;//randomF32(&wstate) / 127.0f;
+    }
+
+    char* xQ = new char[getBatchBytes(Q80, n, 1)];
+    char* wQ8 = new char[getBatchBytes(Q80, n, d)];
+    char* wQ4 = new char[getBatchBytes(Q40, n, d)];
+
+    quantizeQ80Row(x, (BlockQ80*)xQ, n, 1, 0);
+    quantizeQ40Row(w, (BlockQ40*)wQ4, n * d, 1, 0);
+    //quantizeQ80Row(w, (BlockQ80*)wQ8, n * d, 1, 0);
+
+    //matmul(F32, F32, outputCPUComparison, x, w, n, d, 1, 0);
+    //matmul(Q80, Q80, outputCPUQ8, xQ, wQ8, n, d, 1, 0);
+    //matmulVulkan(vulkan, Q80, Q80, outputVulkanQ8, xQ, wQ8, n, d, 1, 0);
+    auto start = std::chrono::high_resolution_clock::now();
+    matmul(Q40, Q80, outputCPUQ4, xQ, wQ4, n, d, 1, 0);
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> executionTime = end - start;
+    std::cout << "CPU Q40/Q80 execution time: " << executionTime.count() << " ms" << std::endl;
+    matmulVulkan(ctx, LayerElement::KEY, Q40, Q80, outputVulkanQ4, xQ, wQ4, n, d, 1, 0);
+
+    printArray(x, 16, "Input");
+    printf("\n");
+    printBlockQ40Row((BlockQ40*)wQ4, "Weights");
+    printf("\n");
+    //printArray(outputCPUQ8, 32, "CPU Results @ Q80");
+    //printf("\n");
+    //printArray(outputVulkanQ8, 32, "Vulkan Results @ Q80");
+    printf("\n");
+    printArray(outputCPUQ4, 16, "CPU Results @ Q40");
+    printf("\n");
+    printArray(outputVulkanQ4, 16, "Vulkan Results @ Q40");
+    printf("\n");
+
+    uint diff = 0;
+    for (int i = 0; i < d; i++) {
+        if(std::fabs(outputCPUQ4[i]-outputVulkanQ4[i]) > 0.001){
+            std::cout << i << ": " << "CPU: " << outputCPUQ4[i] << " != GPU: " << outputVulkanQ4[i] << std::endl;
+            diff++;
+        }
+    }
+    std::cout << "\n";
+    std::cout << "Diff: " << diff << "/" << d << std::endl;
+    
+    delete[] xQ;
+    delete[] wQ4;
+    delete[] wQ8;
+}
+
+void runMatmulQ80Test(VulkanContext* vulkan) {
+    const int n = 4096; //Crashes above this
+    const int d = 4096; //Crashes above this
     unsigned long long state = 88888888L;
     float x[n]; // input matrix
     float w[n * d];  // weights matrix
-    float y[d]; //output matrix
-    float yQ0[d];
-    float yQ1[d];
-    float yQ2[d];
-    float yQ3[d];
-    int i;
-    for (i = 0; i < n; i++) x[i] = randomF32(&state) / 127.0f;
-    for (i = 0; i < n * d; i++) w[i] = randomF32(&state) / 127.0f;
+    float yQ3[d]; // output matrix for CPU
+    float yQ2[d]; // output matrix for Vulkan
 
+    TransformerContext* ctx;
+    ctx->vulkan = vulkan;
+
+    // Initialize input and weights with random values
+    for (int i = 0; i < n; i++) x[i] = randomF32(&state) / 127.0f;
+    for (int i = 0; i < n * d; i++) w[i] = randomF32(&state) / 127.0f;
+
+    // Allocate memory for input and weights
     char* xQ = new char[getBatchBytes(Q80, n, 1)];
-    char* wQ = new char[getBatchBytes(Q80, n, d)];
-    quantizeQ80Row(x, (BlockQ80*)xQ, n, 1, 0);
-    quantizeQ80Row(w, (BlockQ80*)wQ, n * d, 1, 0);
     char* wQ4 = new char[getBatchBytes(Q40, n, d)];
-    quantizeQ40Row(w, (BlockQ40*)wQ4, n * d, 1, 0);
+    
+    if (!xQ || !wQ4) {
+        std::cerr << "Memory allocation failed!" << std::endl;
+        exit(EXIT_FAILURE);
+    }
 
-    matmul(F32, F32, y, x, w, n, d, 1, 0);
-    matmulVulkan(vulkan, Q80, F32, yQ0, x, wQ, n, d, 1, 0);
-    matmulVulkan(vulkan, Q80, Q80, yQ1, xQ, wQ, n, d, 1, 0);
+    // Take x and w and quantize them to Q40/Q80
+    quantizeQ80Row(x, (BlockQ80*)xQ, n, 1, 0);
+    //quantizeQ40Row(w, (BlockQ40*)wQ4, n * d, 1, 0);
+
+    // Measure CPU matmul duration
+    auto start = std::chrono::high_resolution_clock::now();
     matmul(Q40, Q80, yQ3, xQ, wQ4, n, d, 1, 0);
-    matmulVulkan(vulkan, Q40, Q80, yQ2, xQ, wQ4, n, d, 1, 0);
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> cpuDuration = end - start;
 
-    for (i = 0; i < d; i++) {
-        float diff = fabs(y[i] - yQ0[i]);
-        if (diff > 0.001) {
-            printf("❌ matmulQ80() ix=%d %f != %f diff=%f\n", i, y[i], yQ0[i], diff);
-            exit(EXIT_FAILURE);
-        }
-    }
-    printf("✅ matmulQ80\n");
+    // Print the durations
+    std::cout << "CPU matmulQ40Q80 - Duration: " << cpuDuration.count() << " ms" << std::endl;
 
-    for (i = 0; i < d; i++) {
-        float diff = fabs(y[i] - yQ1[i]);
-        if (diff > 0.001) {
-            printf("❌ matmulQ80vQ80() ix=%d %f != %f diff=%f\n", i, y[i], yQ1[i], diff);
-            exit(EXIT_FAILURE);
-        }
-    }
-    printf("✅ matmulQ80vQ80\n");
+    // Measure Vulkan matmul duration
+    start = std::chrono::high_resolution_clock::now();
+    matmulVulkan(ctx, LayerElement::KEY, Q40, Q80, yQ2, xQ, wQ4, n, d, 1, 0);
+    end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> vulkanDuration = end - start;
 
-    
-    printArray(yQ3, 16, "CPU Results");
-    printArray(yQ2, 16, "Vulkan Results");
+    // Print the durations
+    std::cout << "Vulkan matmulQ40Q80 - Duration: " << vulkanDuration.count() << " ms" << std::endl;
 
-    for (i = 0; i < d; i++) {
-        float diff = fabs(y[i] - yQ2[i]);
-        if (diff > 0.001) {
-            printf("❌ matmulQ40Q80() ix=%d %f != %f diff=%f\n", i, y[i], yQ2[i], diff);
-            exit(EXIT_FAILURE);
-        }
-    }
-    printf("✅ matmulQ40Q80\n");
-
-    
-
+    // Clean up
     delete[] xQ;
-    delete[] wQ;
+    delete[] wQ4;
 }
-
 
 int main() {
     initQuants();
 
-    VulkanContext* vulkan = new VulkanContext();
+    void* t = nullptr;
+
+    VulkanContext* vulkan = new VulkanContext((Transformer*)t);
 
     testMatmulQ80(vulkan);
+    //runMatmulQ80Test(vulkan);
+    //testQuantizeQ40();
+
+    delete vulkan;
+
     return EXIT_SUCCESS;
 }

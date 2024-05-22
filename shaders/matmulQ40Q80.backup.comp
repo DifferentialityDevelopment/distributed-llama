@@ -1,0 +1,80 @@
+#version 450
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_nonuniform_qualifier : require
+#extension GL_EXT_control_flow_attributes : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
+
+struct BLOCK_Q40
+{
+    float16_t d;
+    uint8_t qs[16]; // 16 bytes to store 32 nibbles
+};
+
+struct BLOCK_Q80
+{
+    float16_t d;
+    int8_t qs[32]; // 32 bytes to store 32 int8 values
+};
+
+layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) readonly buffer WeightsBuffer {
+    BLOCK_Q40 weights[];
+};
+
+layout(set = 0, binding = 1) readonly buffer InputBuffer {
+    BLOCK_Q80 inputs[];
+};
+
+layout(set = 0, binding = 2) writeonly buffer OutputBuffer {
+    float outputs[];
+};
+
+// Uniform buffer for matrix information
+layout(set = 1, binding = 0) uniform MatMulInfo {
+    int n;  // number of elements to process
+    int ds; // start index for output
+    int de; // end index for output
+};
+
+float dequantizeQ40Weight(uint blockIndex, uint qsIndex) {
+    float16_t d = weights[blockIndex].d;
+    uint8_t qs = weights[blockIndex].qs[qsIndex / 2];
+    uint shift = (qsIndex % 2) * 4;
+    uint quantizedSubValue = (qs >> shift) & 0xF;
+    float dequantizedValue = (float(quantizedSubValue) - 8.0) * float(d);
+    return dequantizedValue;
+}
+
+float dequantizeQ80Input(uint blockIndex, uint qsIndex) {
+    float16_t d = inputs[blockIndex].d;
+    int8_t quantizedValue = int8_t(inputs[blockIndex].qs[qsIndex]);
+    float dequantizedValue = float(quantizedValue) * float(d);
+    return dequantizedValue;
+}
+
+void main() {
+    uint gid = gl_GlobalInvocationID.x;
+
+    // Perform computation
+    float result = 0.0;
+    for (int j = 0; j < n; ++j) {
+        // Calculate block indices and quantized subindices
+        uint blockIndexWeight = gid * (n / 32) + (j / 32);
+        uint blockIndexInput = j / 32;
+        uint qsIndexWeight = j % 32;
+        uint qsIndexInput = j % 32;
+
+        // Dequantize values
+        float weightValue = dequantizeQ40Weight(blockIndexWeight, qsIndexWeight);
+        float inputValue = dequantizeQ80Input(blockIndexInput, qsIndexInput);
+
+        // Accumulate result
+        result += weightValue * inputValue;
+    }
+
+    // Write the result to the output buffer
+    outputs[gid] = result;
+}
