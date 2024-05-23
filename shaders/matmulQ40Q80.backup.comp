@@ -18,7 +18,7 @@ struct BLOCK_Q80
     int8_t qs[32]; // 32 bytes to store 32 int8 values
 };
 
-layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
+layout(local_size_x = 8, local_size_y = 1, local_size_z = 1) in;
 
 layout(set = 0, binding = 0) readonly buffer WeightsBuffer {
     BLOCK_Q40 weights[];

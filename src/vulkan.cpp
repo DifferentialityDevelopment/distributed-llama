@@ -318,14 +318,6 @@ void matmulVulkanQ40vQ80(MatmulThreadInfo* a, LayerElement layerElement) {
 
     auto* cachedWeightsData = vulkan->getLayerBufferData(ctx->currentBlockIndex, layerElement);
     bool weightsLoaded = cachedWeightsData != nullptr;
-
-    /* if(weightsLoaded){
-        printf("Weights cached\n");
-    }
-    else{
-        printf("Weights uncached\n");
-    } */
-
     #pragma region // Create buffers
     // Buffer creation info template
     VkBufferCreateInfo bufferCreateInfo = {};
@@ -493,7 +485,7 @@ void matmulVulkanQ40vQ80(MatmulThreadInfo* a, LayerElement layerElement) {
     #pragma endregion
 
     #pragma region // Dispatch the command buffer and stop recording
-    uint localGroupSize = 2;
+    uint localGroupSize = 1;
     uint numGroups = (a->de - a->ds) / localGroupSize;
     vkCmdDispatch(pipeline->commandBuffer, numGroups, 1, 1);
 
@@ -646,7 +638,7 @@ void VulkanContext::createInstance() {
     appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
     appInfo.pEngineName = "No Engine";
     appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.apiVersion = VK_API_VERSION_1_0;
+    appInfo.apiVersion = VK_API_VERSION_1_3;
 
     VkInstanceCreateInfo createInfo = {};
     createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;

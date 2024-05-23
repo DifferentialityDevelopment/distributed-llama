@@ -21,75 +21,68 @@ struct BLOCK_Q80
 
 layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
 
-layout(set = 0, binding = 0) readonly buffer WeightsBuffer {
+layout(std430, set = 0, binding = 0) readonly buffer WeightsBuffer {
     BLOCK_Q40 weights[];
 };
 
-layout(set = 0, binding = 1) readonly buffer InputBuffer {
+layout(std430, set = 0, binding = 1) readonly buffer InputBuffer {
     BLOCK_Q80 inputs[];
 };
 
-layout(set = 0, binding = 2) writeonly buffer OutputBuffer {
+layout(std430, set = 0, binding = 2) writeonly buffer OutputBuffer {
     float outputs[];
 };
 
-layout(set = 0, binding = 3) readonly buffer ConversionBuffer {
+layout(std430, set = 0, binding = 3) readonly buffer ConversionBuffer {
     float F16_to_F32[65536]; //lookup table for float16 to float32 using uint16_t as index
 };
 
 // Uniform buffer for matrix information
-layout(set = 1, binding = 0) uniform MatMulInfo {
+layout(std430, set = 1, binding = 0) uniform MatMulInfo {
     int n;  // number of elements to process
     int ds; // start index for output
     int de; // end index for output
 };
 
 float convertF16ToF32(uint16_t value) {
-    return F16_to_F32[uint(value)];
+    return F16_to_F32[int(value)];
 }
 
-float dequantizeQ40Weight(uint blockIndex, uint qsIndex, float inputScale) {
-    uint16_t d = weights[blockIndex].d;
-    uint8_t qs = weights[blockIndex].qs[qsIndex / 2];
-    return qs;
-}
-
-float dequantizeQ80Input(uint blockIndex, uint qsIndex) {
-    uint16_t d = inputs[blockIndex].d;
-    int8_t quantizedValue = int8_t(inputs[blockIndex].qs[qsIndex]);
-    float dequantizedValue = float(quantizedValue) * convertF16ToF32(d);
-    return dequantizedValue;
-}
+shared uint totalGid;
 
 void main() {
     const uint gid = gl_GlobalInvocationID.x; // Global Thread ID
-    const uint numberOfBlocks = n / 32;
     const uint dimSize = de - ds;
-    const uint threadShare = 8;
-    const uint threadStart = gid * threadShare;
-    const uint threadEnd = threadStart + threadShare;
 
-    for(uint d = threadStart; d < threadEnd; d++){
-        float acc = 0.0f;
-        for (int j = 0; j < numberOfBlocks; ++j) {
-            uint blockIndexWeight = d * numberOfBlocks + j;
-            //float combinedScale = convertF16ToF32(weights[blockIndexWeight].d) * convertF16ToF32(inputs[j].d);
+    outputs[gid] = 0.0f;
+    barrier();
 
-            uint8_t qsWeight[16] = weights[blockIndexWeight].qs;
-            int bx[32];
-            for (int i = 0; i < 16; i++) {
-                bx[2 * i] = (qsWeight[i] & 0x0F) - 8;
-                bx[2 * i + 1] = ((qsWeight[i] >> 4) & 0x0F) - 8;
-            }
+    float acc = 0.0f;
+    const uint numberOfBlocks = n / 32;
 
-            int8_t by[32] = inputs[j].qs;
-            float q = 0.0f;
-            for (int i = 0; i < 32; i++) {
-                q += (bx[i] * convertF16ToF32(weights[blockIndexWeight].d)) * (by[i] * convertF16ToF32(inputs[j].d));
-            }
+    for (uint j = 0; j < numberOfBlocks; ++j) {
+        uint blockIndexWeight = gid * dimSize + j;
+        float wScale = convertF16ToF32(weights[blockIndexWeight].d);
+        float iScale = convertF16ToF32(inputs[j].d);
+        //float combinedScale = convertF16ToF32(weights[blockIndexWeight].d) * convertF16ToF32(inputs[j].d);
 
-            acc += q;
+        uint8_t qsWeight[16] = weights[blockIndexWeight].qs;
+        int bx[32];
+        for (int i = 0; i < 16; i++) {
+            bx[2 * i] = int(qsWeight[i] & 0x0F) - 8;
+            bx[2 * i + 1] = int((qsWeight[i] >> 4) & 0x0F) - 8;
         }
-        outputs[d] = acc;
+
+        int8_t by[32] = inputs[j].qs;
+        //float q = 0.0f;
+        for (int i = 0; i < 32; i++) {
+            //q += bx[i] * by[i];
+            acc += (bx[i] * wScale) * (by[i] * iScale);
+        }
+        //acc += float(q * combinedScale);
     }
+
+    barrier();
+    outputs[gid] = acc;
+    memoryBarrier();
 }

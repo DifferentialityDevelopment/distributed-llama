@@ -6,6 +6,7 @@
 #include <ostream>
 #include <chrono>
 #include <random>
+#include "quants.hpp"
 #include "transformer.hpp"
 #include "vulkan.hpp"
 #include "utils.hpp"
@@ -54,6 +55,7 @@ void testQuantizeQ40(){
         std::cerr << "Memory allocation failed for wQ4." << std::endl;
         return;
     }
+
     quantizeQ40Row(w, (BlockQ40*)wQ4, n * d, 1, 0);
 
     // Dequantize the Q40 weights
@@ -76,20 +78,15 @@ void testQuantizeQ40(){
     delete[] wDeq;
 }
 
-float getRandomFloat() {
-    // Create a random device and seed the generator
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    // Define a uniform distribution in the range [0.0, 1.0)
-    std::uniform_real_distribution<float> dis(0.0f, 1.0f);
-
-    // Generate and return a random float
-    return dis(gen);
-}
+ // Create a random device and seed the generator
+std::random_device rd;
+std::mt19937 gen(rd());
+// Define a uniform distribution in the range [0.0, 1.0)
+std::uniform_real_distribution<float> dis(0.0f, 4.0f);
 
 void testMatmulQ80(VulkanContext* vulkan) {
-    const int n = 2048;
-    const int d = 2048;
+    const int n = 4096;
+    const int d = 4096;
     unsigned long long wstate = 46546541L;
     unsigned long long istate = 95874562L;
     float* x = new float[n];  // input matrix
@@ -105,10 +102,10 @@ void testMatmulQ80(VulkanContext* vulkan) {
     //float outputVulkanQ8[d]; // output matrix for Vulkan
     int i;
     for (i = 0; i < n; i++){
-        x[i] = getRandomFloat() / 127.0f;//randomF32(&istate) / 127.0f;
+        x[i] = dis(gen) / 127.0f;//randomF32(&istate) / 127.0f;
     }
     for (i = 0; i < n * d; i++){
-        w[i] = getRandomFloat() / 127.0f;//randomF32(&wstate) / 127.0f;
+        w[i] = dis(gen) / 127.0f;//randomF32(&wstate) / 127.0f;
     }
 
     char* xQ = new char[getBatchBytes(Q80, n, 1)];
@@ -145,7 +142,7 @@ void testMatmulQ80(VulkanContext* vulkan) {
     uint diff = 0;
     for (int i = 0; i < d; i++) {
         if(std::fabs(outputCPUQ4[i]-outputVulkanQ4[i]) > 0.001){
-            std::cout << i << ": " << "CPU: " << outputCPUQ4[i] << " != GPU: " << outputVulkanQ4[i] << std::endl;
+            //std::cout << i << ": " << "CPU: " << outputCPUQ4[i] << " != GPU: " << outputVulkanQ4[i] << std::endl;
             diff++;
         }
     }

@@ -185,7 +185,7 @@ void dequantizeQ40Row(const BlockQ40* x, float* y, int k) {
 #endif
 }
 
-void quantizeQ40Row(float* input, BlockQ40* output, int k, unsigned int nThreads, unsigned int threadIndex) {
+void quantizeQ40Row(float* input, BlockQ40* output, long k, unsigned int nThreads, unsigned int threadIndex) {
     assert(k % QK40 == 0);
 
     const int nBlocks = k / QK40;
@@ -196,61 +196,25 @@ void quantizeQ40Row(float* input, BlockQ40* output, int k, unsigned int nThreads
     const float* x = &input[sk * threadIndex];
     BlockQ40* y = &output[blocksPerThread * threadIndex];
 
-#if defined(__ARM_NEON)
-    float dBuf[4];
-
     for (int i = 0; i < currentThreadBlocks; i++) {
-        // Calculate group max and min
-        float group[QK40];
-        float groupAbs[QK40];
-        for (int j = 0; j < QK40; ++j) {
-            group[j] = x[i * QK40 + j];
-            groupAbs[j] = fabs(group[j]);
+        float amax = 0.0f;
+
+        for (int j = 0; j < QK40; j++) {
+            const float v = fabsf(x[i * QK40 + j]);
+            amax = std::max(amax, v);
         }
 
-        float gmax = *std::max_element(groupAbs, groupAbs + QK40);
-        float gmin = -(*std::max_element(group, group + QK40));
+        const float d = amax / ((1 << 3) - 1);
+        const float id = d ? 1.0f / d : 0.0f;
 
-        float delta = std::max(gmax, gmin) / -8;
-        float idelta = (delta != 0) ? 1.0f / delta : 0;
-
-        y[i].d = convertF32ToF16(delta);
-
-        // Quantize the group
-        for (int j = 0; j < QK40 / 2; ++j) {
-            int x0 = std::round(group[j] * idelta + 8.5f);
-            int x1 = std::round(group[j + QK40 / 2] * idelta + 8.5f);
-            x0 = std::min(x0, 15);
-            x1 = std::min(x1, 15);
-            y[i].qs[j] = (x0 & 0x0F) | ((x1 & 0x0F) << 4);
-        }
-    }
-#else
-    for (int i = 0; i < currentThreadBlocks; i++) {
-        float group[QK40];
-        float groupAbs[QK40];
-        for (int j = 0; j < QK40; ++j) {
-            group[j] = x[i * QK40 + j];
-            groupAbs[j] = fabs(group[j]);
-        }
-
-        float gmax = *std::max_element(groupAbs, groupAbs + QK40);
-        float gmin = -(*std::max_element(group, group + QK40));
-
-        float delta = std::max(gmax, gmin) / -8;
-        float idelta = (delta != 0) ? 1.0f / delta : 0;
-
-        y[i].d = convertF32ToF16(delta);
+        y[i].d = convertF32ToF16(d);
 
         for (int j = 0; j < QK40 / 2; ++j) {
-            int x0 = std::round(group[j] * idelta + 8.5f);
-            int x1 = std::round(group[j + QK40 / 2] * idelta + 8.5f);
-            x0 = std::min(x0, 15);
-            x1 = std::min(x1, 15);
-            y[i].qs[j] = (x0 & 0x0F) | ((x1 & 0x0F) << 4);
+            const int x0 = static_cast<int>(roundf(x[i * QK40 + 2 * j] * id));
+            const int x1 = static_cast<int>(roundf(x[i * QK40 + 2 * j + 1] * id));
+            y[i].qs[j] = (x0 + 8) | ((x1 + 8) << 4);
         }
     }
-#endif
 }
 
 void quantizeQ80Row(float* input, BlockQ80* output, int k, unsigned int nThreads, unsigned int threadIndex) {

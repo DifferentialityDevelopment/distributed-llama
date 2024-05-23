@@ -2,6 +2,8 @@
 #include <cassert>
 #include <string.h>
 #include <cstdio>
+#include <iostream>
+#include <ostream>
 #include "utils.hpp"
 #include "funcs.hpp"
 #include "socket.hpp"
@@ -45,15 +47,65 @@ void llamaQkv(TASK_ARGS) {
     float *k0 = &block->kvCacheSlice->keyCache[transformer->pos * block->kvCacheSlice->kvDim0];
     float* v0 = &block->kvCacheSlice->valueCache[transformer->pos * block->kvCacheSlice->kvDim0];
 
-    #ifdef VULKAN
-        matmulVulkan(ctx->vulkan, spec->weightsFloatType, spec->bufferFloatType, block->qo0, xbq, block->q0, block->q0Slice->n, block->q0Slice->d0, nThreads, threadIndex);
-        matmulVulkan(ctx->vulkan, spec->weightsFloatType, spec->bufferFloatType, k0, xbq, block->k0, block->k0Slice->n, block->k0Slice->d0, nThreads, threadIndex);
-        matmulVulkan(ctx->vulkan, spec->weightsFloatType, spec->bufferFloatType, v0, xbq, block->v0, block->v0Slice->n, block->v0Slice->d0, nThreads, threadIndex);
+    /* #ifdef VULKAN
+        matmulVulkan(ctx, LayerElement::QUERY, spec->weightsFloatType, spec->bufferFloatType, block->qo0, xbq, block->q0, block->q0Slice->n, block->q0Slice->d0, nThreads, threadIndex);
+        matmulVulkan(ctx, LayerElement::KEY, spec->weightsFloatType, spec->bufferFloatType, k0, xbq, block->k0, block->k0Slice->n, block->k0Slice->d0, nThreads, threadIndex);
+        matmulVulkan(ctx, LayerElement::VALUE, spec->weightsFloatType, spec->bufferFloatType, v0, xbq, block->v0, block->v0Slice->n, block->v0Slice->d0, nThreads, threadIndex);
     #else
         matmul(spec->weightsFloatType, spec->bufferFloatType, block->qo0, xbq, block->q0, block->q0Slice->n, block->q0Slice->d0, nThreads, threadIndex);
         matmul(spec->weightsFloatType, spec->bufferFloatType, k0, xbq, block->k0, block->k0Slice->n, block->k0Slice->d0, nThreads, threadIndex);
         matmul(spec->weightsFloatType, spec->bufferFloatType, v0, xbq, block->v0, block->v0Slice->n, block->v0Slice->d0, nThreads, threadIndex);
-    #endif
+    #endif */
+    #ifdef VULKAN
+    // Allocate additional memory for CPU results for comparison
+    std::vector<float> cpu_qo0(block->q0Slice->n);
+    std::vector<float> cpu_k0(block->k0Slice->n);
+    std::vector<float> cpu_v0(block->v0Slice->n);
+
+    // Run GPU matmul
+    matmulVulkan(ctx, LayerElement::QUERY, spec->weightsFloatType, spec->bufferFloatType, block->qo0, xbq, block->q0, block->q0Slice->n, block->q0Slice->d0, nThreads, threadIndex);
+    matmulVulkan(ctx, LayerElement::KEY, spec->weightsFloatType, spec->bufferFloatType, k0, xbq, block->k0, block->k0Slice->n, block->k0Slice->d0, nThreads, threadIndex);
+    matmulVulkan(ctx, LayerElement::VALUE, spec->weightsFloatType, spec->bufferFloatType, v0, xbq, block->v0, block->v0Slice->n, block->v0Slice->d0, nThreads, threadIndex);
+
+    // Run CPU matmul
+    matmul(spec->weightsFloatType, spec->bufferFloatType, cpu_qo0.data(), xbq, block->q0, block->q0Slice->n, block->q0Slice->d0, nThreads, threadIndex);
+    matmul(spec->weightsFloatType, spec->bufferFloatType, cpu_k0.data(), xbq, block->k0, block->k0Slice->n, block->k0Slice->d0, nThreads, threadIndex);
+    matmul(spec->weightsFloatType, spec->bufferFloatType, cpu_v0.data(), xbq, block->v0, block->v0Slice->n, block->v0Slice->d0, nThreads, threadIndex);
+
+    // Compare the results
+    int totalMismatchQ = 0;
+    for (int i = 0; i < block->q0Slice->n; ++i) {
+        if (fabs(block->qo0[i] - cpu_qo0[i]) > 1e-5) {
+            totalMismatchQ++;
+            if(i < 5)
+            std::cerr << "Mismatch in QUERY at index " << i << ": GPU=" << block->qo0[i] << ", CPU=" << cpu_qo0[i] << std::endl;
+        }
+    }
+    int totalMismatchK = 0;
+    for (int i = 0; i < block->k0Slice->n; ++i) {
+        if (fabs(k0[i] - cpu_k0[i]) > 1e-5) {
+            totalMismatchK++;
+            if(i < 5)
+            std::cerr << "Mismatch in KEY at index " << i << ": GPU=" << k0[i] << ", CPU=" << cpu_k0[i] << std::endl;
+        }
+    }
+    int totalMismatchV = 0;
+    for (int i = 0; i < block->v0Slice->n; ++i) {
+        if (fabs(v0[i] - cpu_v0[i]) > 1e-5) {
+            totalMismatchV++;
+            if(i < 5)
+            std::cerr << "Mismatch in VALUE at index " << i << ": GPU=" << v0[i] << ", CPU=" << cpu_v0[i] << std::endl;
+        }
+    }
+    std::cerr << "Mismatch in QUERY: " << totalMismatchQ << std::endl;
+    std::cerr << "Mismatch in KEY: " << totalMismatchK << std::endl;
+    std::cerr << "Mismatch in VALUE: " << totalMismatchV << std::endl;
+    exit(0);
+#else
+    matmul(spec->weightsFloatType, spec->bufferFloatType, block->qo0, xbq, block->q0, block->q0Slice->n, block->q0Slice->d0, nThreads, threadIndex);
+    matmul(spec->weightsFloatType, spec->bufferFloatType, k0, xbq, block->k0, block->k0Slice->n, block->k0Slice->d0, nThreads, threadIndex);
+    matmul(spec->weightsFloatType, spec->bufferFloatType, v0, xbq, block->v0, block->v0Slice->n, block->v0Slice->d0, nThreads, threadIndex);
+#endif
 }
 
 void llamaRope(TASK_ARGS) {

@@ -42,8 +42,6 @@ main: src/main.cpp utils quants funcs socket transformer tasks llama2-tasks grok
 endif
 funcs-test: src/funcs-test.cpp funcs utils quants
 	$(CXX) $(CXXFLAGS) src/funcs-test.cpp -o funcs-test funcs.o utils.o quants.o ${LDFLAGS}
-vulkan-test: src/vulkan-test.cpp vulkan funcs utils quants
-	$(CXX) $(CXXFLAGS) src/vulkan-test.cpp -o vulkan-test vulkan.o funcs.o utils.o quants.o ${LDFLAGS}
 quants-test: src/quants.cpp utils quants
 	$(CXX) $(CXXFLAGS) src/quants-test.cpp -o quants-test utils.o quants.o ${LDFLAGS}
 transformer-test: src/transformer-test.cpp funcs utils quants transformer socket
@@ -52,3 +50,5 @@ llama2-tasks-test: src/llama2-tasks-test.cpp utils quants funcs socket transform
 	$(CXX) $(CXXFLAGS) src/llama2-tasks-test.cpp -o llama2-tasks-test utils.o quants.o funcs.o socket.o transformer.o tasks.o llama2-tasks.o tokenizer.o ${LDFLAGS}
 grok1-tasks-test: src/grok1-tasks-test.cpp utils quants funcs socket transformer tasks llama2-tasks grok1-tasks tokenizer
 	$(CXX) $(CXXFLAGS) src/grok1-tasks-test.cpp -o grok1-tasks-test utils.o quants.o funcs.o socket.o transformer.o tasks.o llama2-tasks.o grok1-tasks.o tokenizer.o ${LDFLAGS}
+vulkan-test: src/vulkan-test.cpp vulkan funcs utils quants
+	$(CXX) $(CXXFLAGS) src/vulkan-test.cpp -o vulkan-test vulkan.o funcs.o utils.o quants.o ${LDFLAGS}
